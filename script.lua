@@ -10,17 +10,22 @@ local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 local visitedServers = {}
 
--- [[ SCRIPT STATE TRACKER ]] --
 local scriptState = "SCANNING"
 local fightStartTime = 0
 
+-- Wait for the player to actually load before doing ANYTHING
+if not LocalPlayer.Character then LocalPlayer.CharacterAdded:Wait() end
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+
 -------------------------------------------------------------------------------
--- 0. ON-SCREEN CONSOLE UI (Fixed for Executor Compatibility)
+-- 0. ON-SCREEN CONSOLE UI (Bulletproof)
 -------------------------------------------------------------------------------
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "VicHopConsole"
-ScreenGui.ResetOnSpawn = false -- Keeps it on screen if you die
-ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+if PlayerGui then
+    ScreenGui.Parent = PlayerGui
+end
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 320, 0, 200)
@@ -30,7 +35,7 @@ MainFrame.BackgroundTransparency = 0.2
 MainFrame.BorderSizePixel = 2
 MainFrame.BorderColor3 = Color3.fromRGB(50, 50, 50)
 MainFrame.Active = true
-MainFrame.Draggable = true -- You can now click and drag it around!
+MainFrame.Draggable = true
 
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 25)
@@ -81,15 +86,18 @@ local function Log(msg, level)
     end)
 end
 
-Log("Vic Hop script initialized.", "INFO")
+Log("Vic Hop script successfully executed!", "SUCCESS")
 
 -------------------------------------------------------------------------------
--- 1. ANTI-AFK
+-- 1. ANTI-AFK (Safer Version)
 -------------------------------------------------------------------------------
 LocalPlayer.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
-    Log("Anti-AFK: Prevented idle disconnect.", "WARN")
+    pcall(function()
+        VirtualUser:Button2Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VirtualUser:Button2Up(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
+        Log("Anti-AFK: Prevented idle disconnect.", "WARN")
+    end)
 end)
 
 -------------------------------------------------------------------------------
@@ -152,28 +160,13 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 4. AUTO-RECONNECT (Safely wrapped)
+-- 4. AUTO-RECONNECT (Stripped Down & Safe)
 -------------------------------------------------------------------------------
 GuiService.ErrorMessageChanged:Connect(function(errMsg)
     Log("Roblox Disconnect: " .. tostring(errMsg), "ERROR")
     task.wait(5)
     isHopping = false
     serverHop()
-end)
-
-pcall(function()
-    local cGui = game:GetService("CoreGui")
-    local promptOverlay = cGui:WaitForChild("RobloxPromptGui", 5):WaitForChild("promptOverlay", 5)
-    if promptOverlay then
-        promptOverlay.ChildAdded:Connect(function(child)
-            if child.Name == "ErrorPrompt" then
-                Log("Error prompt detected. Hopping...", "WARN")
-                task.wait(2)
-                isHopping = false
-                serverHop()
-            end
-        end)
-    end
 end)
 
 -------------------------------------------------------------------------------
@@ -234,4 +227,59 @@ local function createPlatform(position)
     local part = Instance.new("Part")
     part.Size = Vector3.new(15, 1, 15)
     part.Position = position - Vector3.new(0, 3.5, 0)
-    part.Anchored
+    part.Anchored = true
+    part.Transparency = 1
+    part.CanCollide = true
+    part.Parent = Workspace
+    return part
+end
+
+-------------------------------------------------------------------------------
+-- 6. MAIN EXECUTION THREAD
+-------------------------------------------------------------------------------
+task.spawn(function()
+    task.wait(2) 
+    
+    Log("Scanning memory for Vicious Bee...", "INFO")
+    local viciousSpike = scanDataForVicious()
+    
+    if viciousSpike then
+        Log("Vicious Bee located! Claiming hive...", "SUCCESS")
+        
+        if claimHiveAndWait() then
+            scriptState = "FIGHTING"
+            fightStartTime = tick()
+            Log("Tweening to boss safely...", "INFO")
+            
+            local targetPivot = viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame
+            local safeCFrame = targetPivot + Vector3.new(0, 30, 0) 
+            
+            tweenTo(safeCFrame)
+            local platform = createPlatform(safeCFrame.Position)
+            Log("Hovering at 30 studs. Waiting for boss to die...", "WARN")
+            
+            while viciousSpike and viciousSpike.Parent do
+                task.wait(0.5)
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    LocalPlayer.Character.HumanoidRootPart.CFrame = safeCFrame
+                end
+            end
+            
+            Log("Boss defeated! Dropping down for stingers...", "SUCCESS")
+            platform:Destroy()
+            
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                LocalPlayer.Character.HumanoidRootPart.CFrame = targetPivot + Vector3.new(0, 5, 0)
+            end
+            
+            task.wait(2) 
+            serverHop()
+        else
+            Log("Failed to claim a hive. Aborting...", "ERROR")
+            serverHop()
+        end
+    else
+        Log("No Vicious Bee found in this server.", "WARN")
+        serverHop()
+    end
+end)
