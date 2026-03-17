@@ -11,6 +11,9 @@ local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 local visitedServers = {}
 
+-- [[ CONFIGURATION ]] --
+local MAX_TIME_IN_SERVER = 150 -- 150 seconds (2.5 minutes). Change this if you need more/less time to kill the boss.
+
 -------------------------------------------------------------------------------
 -- 1. ANTI-AFK (Prevents 20-minute idle kick)
 -------------------------------------------------------------------------------
@@ -23,7 +26,11 @@ end)
 -------------------------------------------------------------------------------
 -- 2. SMART SERVER HOPPING
 -------------------------------------------------------------------------------
+local isHopping = false
 local function serverHop()
+    if isHopping then return end
+    isHopping = true
+    
     print("Finding a safe server to hop to...")
     local serversApi = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Desc&limit=100"
     
@@ -46,14 +53,18 @@ local function serverHop()
             
             print("Teleporting to server (" .. chosenServer.playing .. "/" .. chosenServer.maxPlayers .. ")")
             TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
+            
             task.wait(10)
+            isHopping = false
             serverHop() -- Retry if teleport fails after 10s
         else
             task.wait(3)
+            isHopping = false
             serverHop()
         end
     else
         task.wait(2)
+        isHopping = false
         serverHop()
     end
 end
@@ -138,59 +149,4 @@ end
 local function createPlatform(position)
     local part = Instance.new("Part")
     part.Size = Vector3.new(15, 1, 15)
-    part.Position = position - Vector3.new(0, 3.5, 0)
-    part.Anchored = true
-    part.Transparency = 1
-    part.CanCollide = true
-    part.Parent = Workspace
-    return part
-end
-
--------------------------------------------------------------------------------
--- 5. MAIN EXECUTION THREAD
--------------------------------------------------------------------------------
-task.spawn(function()
-    if not LocalPlayer.Character then LocalPlayer.CharacterAdded:Wait() end
-    task.wait(3) -- Let the map load in
-    
-    local viciousSpike = scanDataForVicious()
-    
-    if viciousSpike then
-        print("Vicious Bee found! Attempting to claim hive...")
-        
-        if claimHiveAndWait() then
-            print("Hive claimed. Moving to Vicious Bee...")
-            
-            local targetPivot = viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame
-            local safeCFrame = targetPivot + Vector3.new(0, 30, 0) -- Hover 30 studs above
-            
-            tweenTo(safeCFrame)
-            local platform = createPlatform(safeCFrame.Position)
-            
-            -- Wait for Vicious Bee to die
-            while viciousSpike and viciousSpike.Parent do
-                task.wait(0.5)
-                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                    LocalPlayer.Character.HumanoidRootPart.CFrame = safeCFrame
-                end
-            end
-            
-            print("Vicious Bee defeated! Collecting stingers...")
-            platform:Destroy()
-            
-            -- Drop down to 5 studs to collect stingers
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                LocalPlayer.Character.HumanoidRootPart.CFrame = targetPivot + Vector3.new(0, 5, 0)
-            end
-            
-            task.wait(2) -- Allow magnet/collection delay
-            serverHop()
-        else
-            print("Failed to claim hive. Hopping to avoid getting stuck...")
-            serverHop()
-        end
-    else
-        print("No Vicious Bee found in this server. Hopping...")
-        serverHop()
-    end
-end)
+    part.Position = position - Vector3.new(0,
