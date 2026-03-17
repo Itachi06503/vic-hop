@@ -13,18 +13,19 @@ local visitedServers = {}
 local scriptState = "SCANNING"
 local fightStartTime = 0
 
--- Wait for the player to actually load before doing ANYTHING
-if not LocalPlayer.Character then LocalPlayer.CharacterAdded:Wait() end
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
-
 -------------------------------------------------------------------------------
--- 0. ON-SCREEN CONSOLE UI (Bulletproof)
+-- 0. ON-SCREEN CONSOLE UI (Delta-Optimized)
 -------------------------------------------------------------------------------
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "VicHopConsole"
 ScreenGui.ResetOnSpawn = false
-if PlayerGui then
-    ScreenGui.Parent = PlayerGui
+
+-- Delta uses gethui() to safely hide GUIs. If it fails, it falls back to PlayerGui.
+local successUI = pcall(function()
+    ScreenGui.Parent = gethui()
+end)
+if not successUI then
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui", 5)
 end
 
 local MainFrame = Instance.new("Frame", ScreenGui)
@@ -40,7 +41,7 @@ MainFrame.Draggable = true
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 25)
 Title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Title.Text = " 🐝 Vic Hop Console"
+Title.Text = " 🐝 Vic Hop Console (Delta)"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Font = Enum.Font.Code
@@ -84,19 +85,21 @@ local function Log(msg, level)
     task.delay(0.05, function()
         Scroll.CanvasPosition = Vector2.new(0, Scroll.AbsoluteCanvasSize.Y)
     end)
+    
+    -- Also print to Delta's built-in console so we can see it there too
+    print("[VIC HOP] " .. tostring(msg))
 end
 
-Log("Vic Hop script successfully executed!", "SUCCESS")
+Log("Script loaded! Checking character...", "SUCCESS")
 
 -------------------------------------------------------------------------------
--- 1. ANTI-AFK (Safer Version)
+-- 1. ANTI-AFK (Mobile / Delta Safe)
 -------------------------------------------------------------------------------
 LocalPlayer.Idled:Connect(function()
     pcall(function()
-        VirtualUser:Button2Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
-        task.wait(1)
-        VirtualUser:Button2Up(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
-        Log("Anti-AFK: Prevented idle disconnect.", "WARN")
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+        Log("Anti-AFK triggered to prevent kick.", "WARN")
     end)
 end)
 
@@ -129,13 +132,14 @@ local function serverHop()
                 local chosenServer = availableServers[math.random(1, #availableServers)]
                 visitedServers[chosenServer.id] = true
                 
-                Log("Teleporting -> Player Count: " .. chosenServer.playing .. "/" .. chosenServer.maxPlayers, "SUCCESS")
+                Log("Teleporting -> " .. chosenServer.playing .. "/" .. chosenServer.maxPlayers .. " players", "SUCCESS")
+                task.wait(1)
                 TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
             else
-                Log("No safe servers found this batch.", "ERROR")
+                Log("No safe servers found. Retrying...", "ERROR")
             end
         else
-            Log("Failed to fetch server list. Retrying...", "ERROR")
+            Log("Failed to read server list. Retrying...", "ERROR")
         end
         
         task.wait(10)
@@ -160,10 +164,10 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 4. AUTO-RECONNECT (Stripped Down & Safe)
+-- 4. AUTO-RECONNECT 
 -------------------------------------------------------------------------------
 GuiService.ErrorMessageChanged:Connect(function(errMsg)
-    Log("Roblox Disconnect: " .. tostring(errMsg), "ERROR")
+    Log("Disconnect: " .. tostring(errMsg), "ERROR")
     task.wait(5)
     isHopping = false
     serverHop()
@@ -200,7 +204,7 @@ local function claimHiveAndWait()
                 local timeout = tick() + 5 
                 while tick() < timeout do
                     if owner.Value == LocalPlayer then
-                        Log("Hive successfully claimed. Waiting 3s for bees...", "SUCCESS")
+                        Log("Hive claimed. Waiting 3s for bees...", "SUCCESS")
                         task.wait(3) 
                         return true
                     end
@@ -238,13 +242,15 @@ end
 -- 6. MAIN EXECUTION THREAD
 -------------------------------------------------------------------------------
 task.spawn(function()
+    -- Safely wait for character without freezing Delta
+    while not LocalPlayer.Character do task.wait(0.5) end
     task.wait(2) 
     
-    Log("Scanning memory for Vicious Bee...", "INFO")
+    Log("Scanning for Vicious Bee...", "INFO")
     local viciousSpike = scanDataForVicious()
     
     if viciousSpike then
-        Log("Vicious Bee located! Claiming hive...", "SUCCESS")
+        Log("Vicious Bee located!", "SUCCESS")
         
         if claimHiveAndWait() then
             scriptState = "FIGHTING"
@@ -256,7 +262,7 @@ task.spawn(function()
             
             tweenTo(safeCFrame)
             local platform = createPlatform(safeCFrame.Position)
-            Log("Hovering at 30 studs. Waiting for boss to die...", "WARN")
+            Log("Hovering at 30 studs. Fighting...", "WARN")
             
             while viciousSpike and viciousSpike.Parent do
                 task.wait(0.5)
@@ -265,7 +271,7 @@ task.spawn(function()
                 end
             end
             
-            Log("Boss defeated! Dropping down for stingers...", "SUCCESS")
+            Log("Boss defeated! Collecting stingers...", "SUCCESS")
             platform:Destroy()
             
             if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
@@ -275,11 +281,11 @@ task.spawn(function()
             task.wait(2) 
             serverHop()
         else
-            Log("Failed to claim a hive. Aborting...", "ERROR")
+            Log("Failed to claim hive. Hopping...", "ERROR")
             serverHop()
         end
     else
-        Log("No Vicious Bee found in this server.", "WARN")
+        Log("No Vicious Bee found. Hopping...", "WARN")
         serverHop()
     end
 end)
