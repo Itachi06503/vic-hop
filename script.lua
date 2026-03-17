@@ -1,3 +1,51 @@
+-- Blacklist table to remember which servers we've already tried
+local visitedServers = {}
+
+-- 3. Upgraded Server Hopping Logic
+local function serverHop()
+    print("Finding a safe server to hop to...")
+    
+    -- Changed sortOrder to Desc (Descending) so it looks at populated servers with space, not entirely dead ones
+    local serversApi = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Desc&limit=100"
+    
+    local success, result = pcall(function() 
+        return HttpService:JSONDecode(game:HttpGet(serversApi)) 
+    end)
+    
+    if success and result and result.data then
+        local availableServers = {}
+        
+        for _, server in ipairs(result.data) do
+            -- BUFFER: Ensure there are at least 2 empty slots so we don't hit the "Full" error
+            -- Also check that we aren't in it, and we haven't visited it yet
+            if server.playing <= (server.maxPlayers - 2) and server.id ~= game.JobId and not visitedServers[server.id] then
+                table.insert(availableServers, server)
+            end
+        end
+        
+        if #availableServers > 0 then
+            -- Pick a random server from the safe list
+            local chosenServer = availableServers[math.random(1, #availableServers)]
+            
+            -- Add it to our blacklist so we don't try it again
+            visitedServers[chosenServer.id] = true
+            
+            print("Teleporting to server with " .. chosenServer.playing .. "/" .. chosenServer.maxPlayers .. " players.")
+            TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
+            
+            -- Wait 10 seconds. If the teleport fails, the script will loop and try a new server.
+            task.wait(10)
+            serverHop()
+        else
+            print("No suitable servers in this batch. Retrying in 3 seconds...")
+            task.wait(3)
+            serverHop()
+        end
+    else
+        task.wait(2)
+        serverHop()
+    end
+end
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
