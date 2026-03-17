@@ -49,7 +49,7 @@ MainFrame.Draggable = true
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 25)
 Title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Title.Text = " 🐝 Vic Hop Console (Tween Claim)"
+Title.Text = " 🐝 Vic Hop Console (Ghost Claim)"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Font = Enum.Font.Code
@@ -172,64 +172,83 @@ local function scanDataForVicious()
     return nil
 end
 
--- Moved tweenTo ABOVE claimHiveAndWait so we can use it!
 local function tweenTo(targetCFrame)
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
+    
+    -- Ghost Mode: Prevent getting stuck on walls while flying
+    for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+        if part:IsA("BasePart") then part.CanCollide = false end
+    end
+
     local distance = (root.Position - targetCFrame.Position).Magnitude
-    local tweenInfo = TweenInfo.new(distance / 45, Enum.EasingStyle.Linear)
+    local tweenInfo = TweenInfo.new(distance / 55, Enum.EasingStyle.Linear) -- Slightly faster
     local tween = TweenService:Create(root, tweenInfo, {CFrame = targetCFrame})
     tween:Play()
     tween.Completed:Wait()
     task.wait(0.5)
 end
 
-local function claimHiveAndWait()
-    local honeycombs = Workspace:WaitForChild("Honeycombs", 5)
+local function checkHiveOwnership()
+    local honeycombs = Workspace:FindFirstChild("Honeycombs")
     if not honeycombs then return false end
     
-    -- 1. Check if we already own one
     for _, hive in ipairs(honeycombs:GetChildren()) do
         local owner = hive:FindFirstChild("Owner")
-        if owner and owner.Value == LocalPlayer then
-            Log("Already own a hive!", "SUCCESS")
+        -- FIXED: Properly reads string names OR player objects
+        if owner and (owner.Value == LocalPlayer or tostring(owner.Value) == LocalPlayer.Name) then
             return true
         end
     end
+    return false
+end
+
+local function claimHiveAndWait()
+    if checkHiveOwnership() then
+        Log("Already own a hive!", "SUCCESS")
+        return true
+    end
     
-    Log("Tweening to empty hive to claim...", "WARN")
+    Log("Spam-claiming empty hives...", "WARN")
+    
+    -- Fast Method: Spam the server claim remote for IDs 1 through 6
+    pcall(function()
+        local events = ReplicatedStorage:FindFirstChild("Events")
+        if events and events:FindFirstChild("ClaimHive") then
+            for i = 1, 6 do
+                events.ClaimHive:InvokeServer(i)
+            end
+        end
+    end)
+    task.wait(1.5)
+    
+    if checkHiveOwnership() then
+        Log("Hive claimed via Server!", "SUCCESS")
+        return true
+    end
+
+    Log("Server claim failed. Forcing physical drop...", "ERROR")
+    
+    -- Backup Method: Drop directly onto the pads
+    local honeycombs = Workspace:FindFirstChild("Honeycombs")
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return false end
     
-    -- 2. Find and tween to an empty one
-    for _, hive in ipairs(honeycombs:GetChildren()) do
-        local owner = hive:FindFirstChild("Owner")
-        if owner and owner.Value == nil then
-            local pad = hive:FindFirstChild("SpawnPos")
-            local hiveID = hive:FindFirstChild("HiveID")
-            
-            if pad then
-                -- Tween directly to the pad smoothly
-                tweenTo(pad.CFrame + Vector3.new(0, 3, 0))
-                
-                -- Drop onto it gently to trigger the game's physical touch
-                root.CFrame = pad.CFrame + Vector3.new(0, 1.5, 0)
-                
-                -- Wait 2 full seconds for the game to register the claim
-                task.wait(2)
-                
-                -- Send the backup server command just in case
-                if hiveID then
-                    pcall(function() 
-                        game:GetService("ReplicatedStorage").Events.ClaimHive:InvokeServer(tonumber(hiveID.Value)) 
-                    end)
-                end
-                
-                task.wait(1.5)
-                
-                if owner.Value == LocalPlayer then
-                    Log("Hive claimed successfully!", "SUCCESS")
-                    return true
+    if honeycombs and root then
+        for _, hive in ipairs(honeycombs:GetChildren()) do
+            local owner = hive:FindFirstChild("Owner")
+            if owner and owner.Value == nil then
+                local pad = hive:FindFirstChild("SpawnPos")
+                if pad then
+                    -- Teleport high up, then directly onto the pad 
+                    root.CFrame = pad.CFrame + Vector3.new(0, 10, 0)
+                    task.wait(0.2)
+                    root.CFrame = pad.CFrame
+                    task.wait(1.5)
+                    
+                    if checkHiveOwnership() then
+                        Log("Physical claim successful!", "SUCCESS")
+                        return true
+                    end
                 end
             end
         end
@@ -268,7 +287,7 @@ task.spawn(function()
             
             local spikeCFrame = viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame
             
-            Log("Approaching target...", "WARN")
+            Log("Ghost-flying to target...", "WARN")
             tweenTo(spikeCFrame)
             task.wait(2) 
             
