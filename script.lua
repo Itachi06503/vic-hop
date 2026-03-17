@@ -5,7 +5,6 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local VirtualUser = game:GetService("VirtualUser")
 local GuiService = game:GetService("GuiService")
-local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -16,22 +15,22 @@ local scriptState = "SCANNING"
 local fightStartTime = 0
 
 -------------------------------------------------------------------------------
--- 0. ON-SCREEN CONSOLE UI
+-- 0. ON-SCREEN CONSOLE UI (Fixed for Executor Compatibility)
 -------------------------------------------------------------------------------
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "VicHopConsole"
--- Attempt to hide it in CoreGui, fallback to PlayerGui if executor restricts it
-if not pcall(function() ScreenGui.Parent = CoreGui end) then
-    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-end
+ScreenGui.ResetOnSpawn = false -- Keeps it on screen if you die
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 320, 0, 200)
-MainFrame.Position = UDim2.new(0, 15, 0, 15) -- Top left corner
+MainFrame.Position = UDim2.new(0, 15, 0, 15)
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 MainFrame.BackgroundTransparency = 0.2
 MainFrame.BorderSizePixel = 2
 MainFrame.BorderColor3 = Color3.fromRGB(50, 50, 50)
+MainFrame.Active = true
+MainFrame.Draggable = true -- You can now click and drag it around!
 
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 25)
@@ -57,7 +56,7 @@ UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 local logCount = 0
 local function Log(msg, level)
     level = level or "INFO"
-    local color = Color3.fromRGB(220, 220, 220) -- Default white
+    local color = Color3.fromRGB(220, 220, 220)
     
     if level == "ERROR" then color = Color3.fromRGB(255, 80, 80)
     elseif level == "WARN" then color = Color3.fromRGB(255, 200, 80)
@@ -77,7 +76,6 @@ local function Log(msg, level)
     logCount = logCount + 1
     txt.LayoutOrder = logCount
 
-    -- Auto-scroll to bottom
     task.delay(0.05, function()
         Scroll.CanvasPosition = Vector2.new(0, Scroll.AbsoluteCanvasSize.Y)
     end)
@@ -154,7 +152,7 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 4. AUTO-RECONNECT
+-- 4. AUTO-RECONNECT (Safely wrapped)
 -------------------------------------------------------------------------------
 GuiService.ErrorMessageChanged:Connect(function(errMsg)
     Log("Roblox Disconnect: " .. tostring(errMsg), "ERROR")
@@ -164,7 +162,8 @@ GuiService.ErrorMessageChanged:Connect(function(errMsg)
 end)
 
 pcall(function()
-    local promptOverlay = CoreGui:WaitForChild("RobloxPromptGui", 5):WaitForChild("promptOverlay", 5)
+    local cGui = game:GetService("CoreGui")
+    local promptOverlay = cGui:WaitForChild("RobloxPromptGui", 5):WaitForChild("promptOverlay", 5)
     if promptOverlay then
         promptOverlay.ChildAdded:Connect(function(child)
             if child.Name == "ErrorPrompt" then
@@ -235,61 +234,4 @@ local function createPlatform(position)
     local part = Instance.new("Part")
     part.Size = Vector3.new(15, 1, 15)
     part.Position = position - Vector3.new(0, 3.5, 0)
-    part.Anchored = true
-    part.Transparency = 1
-    part.CanCollide = true
-    part.Parent = Workspace
-    return part
-end
-
--------------------------------------------------------------------------------
--- 6. MAIN EXECUTION THREAD
--------------------------------------------------------------------------------
-task.spawn(function()
-    Log("Waiting for character to load...", "INFO")
-    if not LocalPlayer.Character then LocalPlayer.CharacterAdded:Wait() end
-    task.wait(3) 
-    
-    Log("Scanning memory for Vicious Bee...", "INFO")
-    local viciousSpike = scanDataForVicious()
-    
-    if viciousSpike then
-        Log("Vicious Bee located! Claiming hive...", "SUCCESS")
-        
-        if claimHiveAndWait() then
-            scriptState = "FIGHTING"
-            fightStartTime = tick()
-            Log("Tweening to boss safely...", "INFO")
-            
-            local targetPivot = viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame
-            local safeCFrame = targetPivot + Vector3.new(0, 30, 0) 
-            
-            tweenTo(safeCFrame)
-            local platform = createPlatform(safeCFrame.Position)
-            Log("Hovering at 30 studs. Waiting for boss to die...", "WARN")
-            
-            while viciousSpike and viciousSpike.Parent do
-                task.wait(0.5)
-                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                    LocalPlayer.Character.HumanoidRootPart.CFrame = safeCFrame
-                end
-            end
-            
-            Log("Boss defeated! Dropping down for stingers...", "SUCCESS")
-            platform:Destroy()
-            
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                LocalPlayer.Character.HumanoidRootPart.CFrame = targetPivot + Vector3.new(0, 5, 0)
-            end
-            
-            task.wait(2) 
-            serverHop()
-        else
-            Log("Failed to claim a hive. Aborting...", "ERROR")
-            serverHop()
-        end
-    else
-        Log("No Vicious Bee found in this server.", "WARN")
-        serverHop()
-    end
-end)
+    part.Anchored
