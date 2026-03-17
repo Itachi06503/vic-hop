@@ -49,7 +49,7 @@ MainFrame.Draggable = true
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 25)
 Title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Title.Text = " 🐝 Vic Hop Console (Anchor Claim)"
+Title.Text = " 🐝 Vic Hop Console (User Claim Method)"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Font = Enum.Font.Code
@@ -188,50 +188,54 @@ local function tweenTo(targetCFrame)
     task.wait(0.5)
 end
 
+-- ============================================================================
+-- USER PROVIDED CLAIM LOGIC
+-- ============================================================================
 local function claimHiveAndWait()
     local honeycombs = Workspace:FindFirstChild("Honeycombs")
     if not honeycombs then return false end
     
-    -- 1. Check if we already own a hive
-    for i = 1, 6 do
-        local hive = honeycombs:FindFirstChild("Hive" .. i)
-        if hive and hive:FindFirstChild("Owner") and hive.Owner.Value == LocalPlayer then
-            Log("Already own Hive " .. i .. "!", "SUCCESS")
+    -- Check if we already own one
+    for _, hive in pairs(honeycombs:GetChildren()) do
+        local owner = hive:FindFirstChild("Owner")
+        if owner and owner.Value == LocalPlayer then
+            Log("Already own a hive!", "SUCCESS")
             return true
         end
     end
     
-    Log("Attempting explicit anchor claim...", "WARN")
+    Log("Running custom claim method...", "WARN")
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return false end
     
-    -- 2. Find an empty hive, freeze over it, and claim
-    for i = 1, 6 do
-        local hive = honeycombs:FindFirstChild("Hive" .. i)
-        if hive and hive:FindFirstChild("Owner") and hive.Owner.Value == nil then
-            local pad = hive:FindFirstChild("SpawnPos")
-            if pad then
-                Log("Testing Hive " .. i .. "...", "INFO")
+    for _, pad in pairs(honeycombs:GetChildren()) do
+        local owner = pad:FindFirstChild("Owner")
+        if owner and owner.Value == nil then
+            local spawnPos = pad:FindFirstChild("SpawnPos")
+            local hiveID = pad:FindFirstChild("HiveID")
+            
+            if spawnPos and hiveID then
+                -- Move to the pad safely (handles if SpawnPos is a Part or a Value)
+                if spawnPos:IsA("BasePart") then
+                    root.CFrame = spawnPos.CFrame + Vector3.new(0, 3, 0)
+                else
+                    root.CFrame = spawnPos.Value + Vector3.new(0, 3, 0)
+                end
                 
-                -- Teleport and lock character in place dead-center on the pad
-                root.CFrame = pad.CFrame + Vector3.new(0, 3, 0)
-                root.Velocity = Vector3.new(0,0,0)
-                root.Anchored = true 
                 task.wait(0.5)
                 
-                -- Fire the server remote using the explicit number
+                -- Fire the claim remote event based on your code
                 pcall(function()
-                    ReplicatedStorage.Events.ClaimHive:InvokeServer(i)
+                    ReplicatedStorage.Events.ClaimHive:FireServer(hiveID.Value)
                 end)
                 
-                task.wait(1.5) -- Give server time to respond
-                root.Anchored = false -- Unfreeze player
+                task.wait(1.5) -- Give the server a moment to register
                 
-                -- Check if the claim was successful
-                if hive.Owner.Value == LocalPlayer then
-                    Log("Hive " .. i .. " claimed successfully!", "SUCCESS")
+                if owner.Value == LocalPlayer then
+                    Log("Hive claimed successfully via custom code!", "SUCCESS")
                     return true
                 end
+                break -- Break the loop after trying an empty pad, just like your code did
             end
         end
     end
