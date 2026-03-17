@@ -49,7 +49,7 @@ MainFrame.Draggable = true
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 25)
 Title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Title.Text = " 🐝 Vic Hop Console (Ghost Claim)"
+Title.Text = " 🐝 Vic Hop Console (Walk Claim)"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Font = Enum.Font.Code
@@ -182,7 +182,7 @@ local function tweenTo(targetCFrame)
     end
 
     local distance = (root.Position - targetCFrame.Position).Magnitude
-    local tweenInfo = TweenInfo.new(distance / 55, Enum.EasingStyle.Linear) -- Slightly faster
+    local tweenInfo = TweenInfo.new(distance / 55, Enum.EasingStyle.Linear)
     local tween = TweenService:Create(root, tweenInfo, {CFrame = targetCFrame})
     tween:Play()
     tween.Completed:Wait()
@@ -195,7 +195,6 @@ local function checkHiveOwnership()
     
     for _, hive in ipairs(honeycombs:GetChildren()) do
         local owner = hive:FindFirstChild("Owner")
-        -- FIXED: Properly reads string names OR player objects
         if owner and (owner.Value == LocalPlayer or tostring(owner.Value) == LocalPlayer.Name) then
             return true
         end
@@ -209,44 +208,43 @@ local function claimHiveAndWait()
         return true
     end
     
-    Log("Spam-claiming empty hives...", "WARN")
+    Log("Walking to an empty hive...", "WARN")
     
-    -- Fast Method: Spam the server claim remote for IDs 1 through 6
-    pcall(function()
-        local events = ReplicatedStorage:FindFirstChild("Events")
-        if events and events:FindFirstChild("ClaimHive") then
-            for i = 1, 6 do
-                events.ClaimHive:InvokeServer(i)
-            end
-        end
-    end)
-    task.wait(1.5)
-    
-    if checkHiveOwnership() then
-        Log("Hive claimed via Server!", "SUCCESS")
-        return true
-    end
-
-    Log("Server claim failed. Forcing physical drop...", "ERROR")
-    
-    -- Backup Method: Drop directly onto the pads
     local honeycombs = Workspace:FindFirstChild("Honeycombs")
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local character = LocalPlayer.Character
+    local humanoid = character and character:FindFirstChild("Humanoid")
+    local root = character and character:FindFirstChild("HumanoidRootPart")
     
-    if honeycombs and root then
+    if honeycombs and humanoid and root then
         for _, hive in ipairs(honeycombs:GetChildren()) do
             local owner = hive:FindFirstChild("Owner")
             if owner and owner.Value == nil then
                 local pad = hive:FindFirstChild("SpawnPos")
+                local hiveID = hive:FindFirstChild("HiveID")
+                
                 if pad then
-                    -- Teleport high up, then directly onto the pad 
-                    root.CFrame = pad.CFrame + Vector3.new(0, 10, 0)
-                    task.wait(0.2)
-                    root.CFrame = pad.CFrame
+                    -- 1. Teleport close to the hives so the walk isn't too long
+                    root.CFrame = pad.CFrame + Vector3.new(0, 5, 20)
+                    task.wait(0.5)
+                    
+                    -- 2. Force the Humanoid to physically walk onto the pad
+                    humanoid:MoveTo(pad.Position)
+                    humanoid.MoveToFinished:Wait() -- Wait until the walk is done
+                    
+                    -- Stand on it for 1.5 seconds to let the game register it
                     task.wait(1.5)
                     
+                    -- 3. Backup Server Command
+                    if hiveID then
+                        pcall(function()
+                            game:GetService("ReplicatedStorage").Events.ClaimHive:InvokeServer(tonumber(hiveID.Value))
+                        end)
+                    end
+                    
+                    task.wait(1)
+                    
                     if checkHiveOwnership() then
-                        Log("Physical claim successful!", "SUCCESS")
+                        Log("Walked on and claimed hive successfully!", "SUCCESS")
                         return true
                     end
                 end
