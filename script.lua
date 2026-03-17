@@ -13,6 +13,9 @@ local visitedServers = {}
 local scriptState = "SCANNING"
 local fightStartTime = 0
 
+-- Find the correct executor HTTP request function
+local fetchReq = request or http_request or (http and http.request) or (syn and syn.request)
+
 -------------------------------------------------------------------------------
 -- 0. ON-SCREEN CONSOLE UI (Delta-Optimized)
 -------------------------------------------------------------------------------
@@ -20,13 +23,8 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "VicHopConsole"
 ScreenGui.ResetOnSpawn = false
 
--- Delta uses gethui() to safely hide GUIs. If it fails, it falls back to PlayerGui.
-local successUI = pcall(function()
-    ScreenGui.Parent = gethui()
-end)
-if not successUI then
-    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui", 5)
-end
+local successUI = pcall(function() ScreenGui.Parent = gethui() end)
+if not successUI then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui", 5) end
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 320, 0, 200)
@@ -82,18 +80,14 @@ local function Log(msg, level)
     logCount = logCount + 1
     txt.LayoutOrder = logCount
 
-    task.delay(0.05, function()
-        Scroll.CanvasPosition = Vector2.new(0, Scroll.AbsoluteCanvasSize.Y)
-    end)
-    
-    -- Also print to Delta's built-in console so we can see it there too
+    task.delay(0.05, function() Scroll.CanvasPosition = Vector2.new(0, Scroll.AbsoluteCanvasSize.Y) end)
     print("[VIC HOP] " .. tostring(msg))
 end
 
 Log("Script loaded! Checking character...", "SUCCESS")
 
 -------------------------------------------------------------------------------
--- 1. ANTI-AFK (Mobile / Delta Safe)
+-- 1. ANTI-AFK
 -------------------------------------------------------------------------------
 LocalPlayer.Idled:Connect(function()
     pcall(function()
@@ -104,7 +98,7 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. SMART SERVER HOPPING
+-- 2. SMART SERVER HOPPING (Fixed for Delta)
 -------------------------------------------------------------------------------
 local isHopping = false
 local function serverHop()
@@ -115,9 +109,15 @@ local function serverHop()
     Log("Searching for a new server...", "INFO")
     
     task.spawn(function()
-        local serversApi = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Desc&limit=100"
+        local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Desc&limit=100"
+        
         local success, result = pcall(function() 
-            return HttpService:JSONDecode(game:HttpGet(serversApi)) 
+            if fetchReq then
+                local response = fetchReq({Url = serversApi, Method = "GET"})
+                return HttpService:JSONDecode(response.Body)
+            else
+                return HttpService:JSONDecode(game:HttpGet(serversApi)) 
+            end
         end)
         
         if success and result and result.data then
@@ -136,7 +136,7 @@ local function serverHop()
                 task.wait(1)
                 TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
             else
-                Log("No safe servers found. Retrying...", "ERROR")
+                Log("No safe servers found. Retrying...", "WARN")
             end
         else
             Log("Failed to read server list. Retrying...", "ERROR")
@@ -232,60 +232,3 @@ local function createPlatform(position)
     part.Size = Vector3.new(15, 1, 15)
     part.Position = position - Vector3.new(0, 3.5, 0)
     part.Anchored = true
-    part.Transparency = 1
-    part.CanCollide = true
-    part.Parent = Workspace
-    return part
-end
-
--------------------------------------------------------------------------------
--- 6. MAIN EXECUTION THREAD
--------------------------------------------------------------------------------
-task.spawn(function()
-    -- Safely wait for character without freezing Delta
-    while not LocalPlayer.Character do task.wait(0.5) end
-    task.wait(2) 
-    
-    Log("Scanning for Vicious Bee...", "INFO")
-    local viciousSpike = scanDataForVicious()
-    
-    if viciousSpike then
-        Log("Vicious Bee located!", "SUCCESS")
-        
-        if claimHiveAndWait() then
-            scriptState = "FIGHTING"
-            fightStartTime = tick()
-            Log("Tweening to boss safely...", "INFO")
-            
-            local targetPivot = viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame
-            local safeCFrame = targetPivot + Vector3.new(0, 30, 0) 
-            
-            tweenTo(safeCFrame)
-            local platform = createPlatform(safeCFrame.Position)
-            Log("Hovering at 30 studs. Fighting...", "WARN")
-            
-            while viciousSpike and viciousSpike.Parent do
-                task.wait(0.5)
-                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                    LocalPlayer.Character.HumanoidRootPart.CFrame = safeCFrame
-                end
-            end
-            
-            Log("Boss defeated! Collecting stingers...", "SUCCESS")
-            platform:Destroy()
-            
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                LocalPlayer.Character.HumanoidRootPart.CFrame = targetPivot + Vector3.new(0, 5, 0)
-            end
-            
-            task.wait(2) 
-            serverHop()
-        else
-            Log("Failed to claim hive. Hopping...", "ERROR")
-            serverHop()
-        end
-    else
-        Log("No Vicious Bee found. Hopping...", "WARN")
-        serverHop()
-    end
-end)
