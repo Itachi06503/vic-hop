@@ -16,23 +16,16 @@ local visitedServers = {}
 local scriptState = "SCANNING"
 local fightStartTime = 0
 
--- Find the correct executor HTTP request function safely
 local fetchReq = nil
-pcall(function()
-    fetchReq = request or http_request or (http and http.request) or (syn and syn.request)
-end)
+pcall(function() fetchReq = request or http_request or (http and http.request) or (syn and syn.request) end)
 
 -------------------------------------------------------------------------------
 -- 0. ON-SCREEN CONSOLE UI (Delta-Optimized)
 -------------------------------------------------------------------------------
 pcall(function()
     local hiddenGui = gethui()
-    for _, v in pairs(hiddenGui:GetChildren()) do
-        if v.Name == "VicHopConsole" then v:Destroy() end
-    end
-    for _, v in pairs(LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do
-        if v.Name == "VicHopConsole" then v:Destroy() end
-    end
+    for _, v in pairs(hiddenGui:GetChildren()) do if v.Name == "VicHopConsole" then v:Destroy() end end
+    for _, v in pairs(LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do if v.Name == "VicHopConsole" then v:Destroy() end end
 end)
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -114,7 +107,7 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. SMART SERVER HOPPING (With Random Fallback)
+-- 2. SMART SERVER HOPPING
 -------------------------------------------------------------------------------
 local isHopping = false
 local function serverHop()
@@ -147,25 +140,22 @@ local function serverHop()
             if #availableServers > 0 then
                 local chosenServer = availableServers[math.random(1, #availableServers)]
                 visitedServers[chosenServer.id] = true
-                
                 Log("Teleporting -> " .. chosenServer.playing .. "/" .. chosenServer.maxPlayers .. " players", "SUCCESS")
                 task.wait(1)
                 TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
-                return -- Stop here if successful
+                return 
             end
         end
         
-        -- If API fails or no servers found, FORCE a random hop so we don't get stuck
         Log("No specific servers found. Random Hopping...", "WARN")
         TeleportService:Teleport(PlaceId, LocalPlayer)
-        
         task.wait(10)
         isHopping = false
     end)
 end
 
 -------------------------------------------------------------------------------
--- 3. BACKGROUND WATCHDOG (60s Failsafe)
+-- 3. BACKGROUND WATCHDOG
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(60) do
@@ -173,16 +163,13 @@ task.spawn(function()
             Log("Watchdog: Stuck for 60s. Forcing hop...", "ERROR")
             isHopping = false 
             serverHop()
-        elseif scriptState == "FIGHTING" and (tick() - fightStartTime) > 180 then
-            Log("Watchdog: Fight timed out (3+ mins). Hopping...", "ERROR")
+        elseif scriptState == "FIGHTING" and (tick() - fightStartTime) > 240 then
+            Log("Watchdog: Fight timed out (4+ mins). Hopping...", "ERROR")
             serverHop()
         end
     end
 end)
 
--------------------------------------------------------------------------------
--- 4. AUTO-RECONNECT 
--------------------------------------------------------------------------------
 GuiService.ErrorMessageChanged:Connect(function(errMsg)
     Log("Disconnect: " .. tostring(errMsg), "ERROR")
     task.wait(5)
@@ -191,7 +178,7 @@ GuiService.ErrorMessageChanged:Connect(function(errMsg)
 end)
 
 -------------------------------------------------------------------------------
--- 5. UTILITY FUNCTIONS (Fixed Hive Claiming)
+-- 4. UTILITY FUNCTIONS (Fixed Hive Check)
 -------------------------------------------------------------------------------
 local function scanDataForVicious()
     local targetFolders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
@@ -211,16 +198,18 @@ local function claimHiveAndWait()
     local honeycombs = Workspace:WaitForChild("Honeycombs", 5)
     if not honeycombs then return false end
     
-    -- STEP 1: Check if we ALREADY own a hive
+    -- STEP 1: Verify ownership thoroughly (checks both Instance and String names)
     for _, hive in ipairs(honeycombs:GetChildren()) do
         local owner = hive:FindFirstChild("Owner")
-        if owner and owner.Value == LocalPlayer then
-            Log("Already own a hive! Ready to fight.", "SUCCESS")
-            return true
+        if owner then
+            if owner.Value == LocalPlayer or tostring(owner.Value) == LocalPlayer.Name then
+                Log("Already own a hive! Ready to fight.", "SUCCESS")
+                return true
+            end
         end
     end
     
-    -- STEP 2: If we don't own one, try to claim one
+    -- STEP 2: Claim an empty hive
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return false end
     
@@ -229,11 +218,15 @@ local function claimHiveAndWait()
         if owner and owner.Value == nil then
             local pad = hive:FindFirstChild("SpawnPos")
             if pad then
-                -- Drop slightly above the pad so the physics engine registers the touch
-                root.CFrame = pad.CFrame + Vector3.new(0, 3, 0)
+                -- Drop onto the pad to trigger the physical 'Touch' event
+                root.CFrame = pad.CFrame + Vector3.new(0, 2, 0)
+                if LocalPlayer.Character:FindFirstChild("Humanoid") then
+                    LocalPlayer.Character.Humanoid.Jump = true
+                end
+                
                 local timeout = tick() + 4 
                 while tick() < timeout do
-                    if owner.Value == LocalPlayer then
+                    if owner.Value == LocalPlayer or tostring(owner.Value) == LocalPlayer.Name then
                         Log("Hive successfully claimed!", "SUCCESS")
                         task.wait(2) 
                         return true
@@ -269,7 +262,7 @@ local function createPlatform(position)
 end
 
 -------------------------------------------------------------------------------
--- 6. MAIN EXECUTION THREAD
+-- 5. MAIN EXECUTION THREAD (Fixed Boss Trigger)
 -------------------------------------------------------------------------------
 task.spawn(function()
     while not LocalPlayer.Character do task.wait(0.5) end
@@ -279,35 +272,49 @@ task.spawn(function()
     local viciousSpike = scanDataForVicious()
     
     if viciousSpike then
-        Log("Vicious Bee located!", "SUCCESS")
+        Log("Vicious Bee spike located!", "SUCCESS")
         
         if claimHiveAndWait() then
             scriptState = "FIGHTING"
             fightStartTime = tick()
-            Log("Tweening to boss safely...", "INFO")
             
-            local targetPivot = viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame
-            local safeCFrame = targetPivot + Vector3.new(0, 30, 0) 
+            local spikeCFrame = viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame
             
-            tweenTo(safeCFrame)
-            local platform = createPlatform(safeCFrame.Position)
-            Log("Hovering at 30 studs. Fighting...", "WARN")
+            -- FIX: Walk directly INTO the spike to summon the boss first
+            Log("Touching spike to summon boss...", "WARN")
+            tweenTo(spikeCFrame)
+            task.wait(2) -- Wait for the spawn animation
             
-            while viciousSpike and viciousSpike.Parent do
-                task.wait(0.5)
-                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                    LocalPlayer.Character.HumanoidRootPart.CFrame = safeCFrame
+            -- Re-scan to find the actual flying boss monster
+            local actualBoss = scanDataForVicious()
+            if actualBoss then
+                Log("Boss spawned! Hovering 30 studs...", "INFO")
+                local safeCFrame = spikeCFrame + Vector3.new(0, 30, 0) 
+                tweenTo(safeCFrame)
+                local platform = createPlatform(safeCFrame.Position)
+                
+                while actualBoss and actualBoss.Parent do
+                    task.wait(0.5)
+                    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                        -- Follow the boss slowly from above if it moves
+                        local bossPos = actualBoss:IsA("Model") and actualBoss:GetPivot().Position or actualBoss.Position
+                        LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(bossPos + Vector3.new(0, 30, 0))
+                        platform.Position = (bossPos + Vector3.new(0, 30, 0)) - Vector3.new(0, 3.5, 0)
+                    end
                 end
+                
+                Log("Boss defeated! Collecting stingers...", "SUCCESS")
+                platform:Destroy()
+                
+                -- Drop down to collect tokens
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    LocalPlayer.Character.HumanoidRootPart.CFrame = spikeCFrame + Vector3.new(0, 3, 0)
+                end
+            else
+                Log("Boss didn't spawn or died instantly.", "WARN")
             end
             
-            Log("Boss defeated! Collecting stingers...", "SUCCESS")
-            platform:Destroy()
-            
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                LocalPlayer.Character.HumanoidRootPart.CFrame = targetPivot + Vector3.new(0, 5, 0)
-            end
-            
-            task.wait(2) 
+            task.wait(3) 
             serverHop()
         else
             Log("Failed to claim hive. Hopping...", "ERROR")
