@@ -21,7 +21,7 @@ local fetchReq = nil
 pcall(function() fetchReq = request or http_request or (http and http.request) or (syn and syn.request) end)
 
 -------------------------------------------------------------------------------
--- 0. ON-SCREEN CONSOLE UI (Delta-Optimized)
+-- 0. ON-SCREEN CONSOLE UI
 -------------------------------------------------------------------------------
 pcall(function()
     local hiddenGui = gethui()
@@ -49,7 +49,7 @@ MainFrame.Draggable = true
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 25)
 Title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Title.Text = " 🐝 Vic Hop Console (Safe Mode)"
+Title.Text = " 🐝 Vic Hop Console (Brute-Force)"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Font = Enum.Font.Code
@@ -156,14 +156,13 @@ end)
 GuiService.ErrorMessageChanged:Connect(function() task.wait(5); isHopping = false; serverHop() end)
 
 -------------------------------------------------------------------------------
--- 2. UTILITY FUNCTIONS (Crash-Proof)
+-- 2. UTILITY FUNCTIONS (Brute-Force Hive Claimer)
 -------------------------------------------------------------------------------
 local function scanDataForVicious()
     local targetFolders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
     for _, folder in ipairs(targetFolders) do
         if folder then
             for _, obj in ipairs(folder:GetDescendants()) do
-                -- Ensure it's named vicious AND is a physical object (prevents crashing!)
                 if string.find(string.lower(obj.Name), "vicious") and (obj:IsA("BasePart") or obj:IsA("Model")) then
                     return obj
                 end
@@ -173,56 +172,58 @@ local function scanDataForVicious()
     return nil
 end
 
+local function checkAlreadyOwned(honeycombs)
+    for _, hive in ipairs(honeycombs:GetChildren()) do
+        local owner = hive:FindFirstChild("Owner")
+        if owner and (owner.Value == LocalPlayer or tostring(owner.Value) == LocalPlayer.Name) then
+            return true
+        end
+    end
+    return false
+end
+
 local function claimHiveAndWait()
     local honeycombs = Workspace:WaitForChild("Honeycombs", 5)
     if not honeycombs then return false end
     
-    local alreadyOwned = false
-    pcall(function()
-        for _, hive in ipairs(honeycombs:GetChildren()) do
-            local owner = hive:FindFirstChild("Owner")
-            if owner and (owner.Value == LocalPlayer or tostring(owner.Value) == LocalPlayer.Name) then
-                alreadyOwned = true
-            end
-        end
-    end)
-    
-    if alreadyOwned then
+    if checkAlreadyOwned(honeycombs) then
         Log("Already own a hive!", "SUCCESS")
         return true
     end
     
-    -- Try to claim via official game server event
-    Log("Claiming empty hive...", "INFO")
-    pcall(function()
-        local events = ReplicatedStorage:FindFirstChild("Events")
-        if events and events:FindFirstChild("ClaimHive") then
-            for _, hive in ipairs(honeycombs:GetChildren()) do
-                local owner = hive:FindFirstChild("Owner")
-                if owner and owner.Value == nil then
-                    local hiveID = hive:FindFirstChild("HiveID")
-                    if hiveID then events.ClaimHive:InvokeServer(hiveID.Value) end
+    Log("Brute-forcing empty hives...", "WARN")
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    
+    for _, hive in ipairs(honeycombs:GetChildren()) do
+        local owner = hive:FindFirstChild("Owner")
+        if owner and owner.Value == nil then
+            local pad = hive:FindFirstChild("SpawnPos")
+            if pad then
+                -- 1. Try sending the official remote
+                pcall(function() game:GetService("ReplicatedStorage").Events.ClaimHive:InvokeServer(hive.Name) end)
+                
+                -- 2. Physically drop onto the pad
+                root.CFrame = pad.CFrame + Vector3.new(0, 5, 0)
+                task.wait(0.5)
+                
+                -- 3. Force the physical touch event using Delta
+                pcall(function()
+                    if firetouchinterest then
+                        firetouchinterest(root, pad, 0)
+                        task.wait(0.1)
+                        firetouchinterest(root, pad, 1)
+                    end
+                end)
+                
+                task.wait(1)
+                
+                if checkAlreadyOwned(honeycombs) then
+                    Log("Hive claimed successfully!", "SUCCESS")
+                    return true
                 end
             end
         end
-    end)
-    
-    task.wait(1.5)
-    
-    -- Verify if we got it
-    local remoteWorked = false
-    pcall(function()
-        for _, hive in ipairs(honeycombs:GetChildren()) do
-            local owner = hive:FindFirstChild("Owner")
-            if owner and (owner.Value == LocalPlayer or tostring(owner.Value) == LocalPlayer.Name) then
-                remoteWorked = true
-            end
-        end
-    end)
-    
-    if remoteWorked then
-        Log("Hive claimed successfully!", "SUCCESS")
-        return true
     end
     
     return false
@@ -267,7 +268,6 @@ task.spawn(function()
             scriptState = "FIGHTING"
             fightStartTime = tick()
             
-            -- Safely get CFrame to prevent crashing
             local spikeCFrame = viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame
             
             Log("Approaching target...", "WARN")
