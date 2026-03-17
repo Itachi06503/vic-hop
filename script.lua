@@ -1,4 +1,4 @@
--- Wait for the game to fully load before Delta does anything
+-- Wait for the game to fully load
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 local TeleportService = game:GetService("TeleportService")
@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local VirtualUser = game:GetService("VirtualUser")
 local GuiService = game:GetService("GuiService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -48,7 +49,7 @@ MainFrame.Draggable = true
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 25)
 Title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Title.Text = " 🐝 Vic Hop Console (Delta)"
+Title.Text = " 🐝 Vic Hop Console (Safe Mode)"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Font = Enum.Font.Code
@@ -88,27 +89,18 @@ local function Log(msg, level)
     
     logCount = logCount + 1
     txt.LayoutOrder = logCount
-
     task.delay(0.05, function() Scroll.CanvasPosition = Vector2.new(0, Scroll.AbsoluteCanvasSize.Y) end)
-    print("[VIC HOP] " .. tostring(msg))
 end
 
 Log("Script loaded! Checking character...", "SUCCESS")
 
 -------------------------------------------------------------------------------
--- 1. ANTI-AFK
+-- 1. ANTI-AFK & WATCHDOG
 -------------------------------------------------------------------------------
 LocalPlayer.Idled:Connect(function()
-    pcall(function()
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-        Log("Anti-AFK triggered to prevent kick.", "WARN")
-    end)
+    pcall(function() VirtualUser:ClickButton2(Vector2.new()) end)
 end)
 
--------------------------------------------------------------------------------
--- 2. SMART SERVER HOPPING
--------------------------------------------------------------------------------
 local isHopping = false
 local function serverHop()
     scriptState = "HOPPING"
@@ -116,10 +108,8 @@ local function serverHop()
     isHopping = true
     
     Log("Searching for a new server...", "INFO")
-    
     task.spawn(function()
         local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100"
-        
         local success, result = pcall(function() 
             if fetchReq then
                 local response = fetchReq({Url = serversApi, Method = "GET"})
@@ -132,60 +122,49 @@ local function serverHop()
         if success and result and result.data then
             local availableServers = {}
             for _, server in ipairs(result.data) do
-                if server.playing and server.playing < server.maxPlayers and server.id ~= game.JobId and not visitedServers[server.id] then
+                if server.playing and server.playing < server.maxPlayers and server.id ~= game.JobId then
                     table.insert(availableServers, server)
                 end
             end
-            
             if #availableServers > 0 then
                 local chosenServer = availableServers[math.random(1, #availableServers)]
-                visitedServers[chosenServer.id] = true
                 Log("Teleporting -> " .. chosenServer.playing .. "/" .. chosenServer.maxPlayers .. " players", "SUCCESS")
                 task.wait(1)
                 TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
                 return 
             end
         end
-        
-        Log("No specific servers found. Random Hopping...", "WARN")
+        Log("Random Hopping...", "WARN")
         TeleportService:Teleport(PlaceId, LocalPlayer)
         task.wait(10)
         isHopping = false
     end)
 end
 
--------------------------------------------------------------------------------
--- 3. BACKGROUND WATCHDOG
--------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(60) do
         if scriptState == "HOPPING" or scriptState == "SCANNING" then
             Log("Watchdog: Stuck for 60s. Forcing hop...", "ERROR")
-            isHopping = false 
-            serverHop()
+            isHopping = false; serverHop()
         elseif scriptState == "FIGHTING" and (tick() - fightStartTime) > 240 then
-            Log("Watchdog: Fight timed out (4+ mins). Hopping...", "ERROR")
+            Log("Watchdog: Fight timed out. Hopping...", "ERROR")
             serverHop()
         end
     end
 end)
 
-GuiService.ErrorMessageChanged:Connect(function(errMsg)
-    Log("Disconnect: " .. tostring(errMsg), "ERROR")
-    task.wait(5)
-    isHopping = false
-    serverHop()
-end)
+GuiService.ErrorMessageChanged:Connect(function() task.wait(5); isHopping = false; serverHop() end)
 
 -------------------------------------------------------------------------------
--- 4. UTILITY FUNCTIONS (Fixed Hive Check)
+-- 2. UTILITY FUNCTIONS (Crash-Proof)
 -------------------------------------------------------------------------------
 local function scanDataForVicious()
     local targetFolders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
     for _, folder in ipairs(targetFolders) do
         if folder then
             for _, obj in ipairs(folder:GetDescendants()) do
-                if string.find(string.lower(obj.Name), "vicious") then
+                -- Ensure it's named vicious AND is a physical object (prevents crashing!)
+                if string.find(string.lower(obj.Name), "vicious") and (obj:IsA("BasePart") or obj:IsA("Model")) then
                     return obj
                 end
             end
@@ -198,44 +177,54 @@ local function claimHiveAndWait()
     local honeycombs = Workspace:WaitForChild("Honeycombs", 5)
     if not honeycombs then return false end
     
-    -- STEP 1: Verify ownership thoroughly (checks both Instance and String names)
-    for _, hive in ipairs(honeycombs:GetChildren()) do
-        local owner = hive:FindFirstChild("Owner")
-        if owner then
-            if owner.Value == LocalPlayer or tostring(owner.Value) == LocalPlayer.Name then
-                Log("Already own a hive! Ready to fight.", "SUCCESS")
-                return true
+    local alreadyOwned = false
+    pcall(function()
+        for _, hive in ipairs(honeycombs:GetChildren()) do
+            local owner = hive:FindFirstChild("Owner")
+            if owner and (owner.Value == LocalPlayer or tostring(owner.Value) == LocalPlayer.Name) then
+                alreadyOwned = true
             end
         end
+    end)
+    
+    if alreadyOwned then
+        Log("Already own a hive!", "SUCCESS")
+        return true
     end
     
-    -- STEP 2: Claim an empty hive
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return false end
-    
-    for _, hive in ipairs(honeycombs:GetChildren()) do
-        local owner = hive:FindFirstChild("Owner")
-        if owner and owner.Value == nil then
-            local pad = hive:FindFirstChild("SpawnPos")
-            if pad then
-                -- Drop onto the pad to trigger the physical 'Touch' event
-                root.CFrame = pad.CFrame + Vector3.new(0, 2, 0)
-                if LocalPlayer.Character:FindFirstChild("Humanoid") then
-                    LocalPlayer.Character.Humanoid.Jump = true
-                end
-                
-                local timeout = tick() + 4 
-                while tick() < timeout do
-                    if owner.Value == LocalPlayer or tostring(owner.Value) == LocalPlayer.Name then
-                        Log("Hive successfully claimed!", "SUCCESS")
-                        task.wait(2) 
-                        return true
-                    end
-                    task.wait(0.2)
+    -- Try to claim via official game server event
+    Log("Claiming empty hive...", "INFO")
+    pcall(function()
+        local events = ReplicatedStorage:FindFirstChild("Events")
+        if events and events:FindFirstChild("ClaimHive") then
+            for _, hive in ipairs(honeycombs:GetChildren()) do
+                local owner = hive:FindFirstChild("Owner")
+                if owner and owner.Value == nil then
+                    local hiveID = hive:FindFirstChild("HiveID")
+                    if hiveID then events.ClaimHive:InvokeServer(hiveID.Value) end
                 end
             end
         end
+    end)
+    
+    task.wait(1.5)
+    
+    -- Verify if we got it
+    local remoteWorked = false
+    pcall(function()
+        for _, hive in ipairs(honeycombs:GetChildren()) do
+            local owner = hive:FindFirstChild("Owner")
+            if owner and (owner.Value == LocalPlayer or tostring(owner.Value) == LocalPlayer.Name) then
+                remoteWorked = true
+            end
+        end
+    end)
+    
+    if remoteWorked then
+        Log("Hive claimed successfully!", "SUCCESS")
+        return true
     end
+    
     return false
 end
 
@@ -262,7 +251,7 @@ local function createPlatform(position)
 end
 
 -------------------------------------------------------------------------------
--- 5. MAIN EXECUTION THREAD (Fixed Boss Trigger)
+-- 3. MAIN THREAD
 -------------------------------------------------------------------------------
 task.spawn(function()
     while not LocalPlayer.Character do task.wait(0.5) end
@@ -272,46 +261,40 @@ task.spawn(function()
     local viciousSpike = scanDataForVicious()
     
     if viciousSpike then
-        Log("Vicious Bee spike located!", "SUCCESS")
+        Log("Vicious target located!", "SUCCESS")
         
         if claimHiveAndWait() then
             scriptState = "FIGHTING"
             fightStartTime = tick()
             
+            -- Safely get CFrame to prevent crashing
             local spikeCFrame = viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame
             
-            -- FIX: Walk directly INTO the spike to summon the boss first
-            Log("Touching spike to summon boss...", "WARN")
+            Log("Approaching target...", "WARN")
             tweenTo(spikeCFrame)
-            task.wait(2) -- Wait for the spawn animation
+            task.wait(2) 
             
-            -- Re-scan to find the actual flying boss monster
-            local actualBoss = scanDataForVicious()
-            if actualBoss then
-                Log("Boss spawned! Hovering 30 studs...", "INFO")
-                local safeCFrame = spikeCFrame + Vector3.new(0, 30, 0) 
-                tweenTo(safeCFrame)
-                local platform = createPlatform(safeCFrame.Position)
-                
-                while actualBoss and actualBoss.Parent do
-                    task.wait(0.5)
-                    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                        -- Follow the boss slowly from above if it moves
-                        local bossPos = actualBoss:IsA("Model") and actualBoss:GetPivot().Position or actualBoss.Position
-                        LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(bossPos + Vector3.new(0, 30, 0))
-                        platform.Position = (bossPos + Vector3.new(0, 30, 0)) - Vector3.new(0, 3.5, 0)
-                    end
-                end
-                
-                Log("Boss defeated! Collecting stingers...", "SUCCESS")
-                platform:Destroy()
-                
-                -- Drop down to collect tokens
+            Log("Hovering and fighting...", "INFO")
+            local safeCFrame = spikeCFrame + Vector3.new(0, 30, 0) 
+            tweenTo(safeCFrame)
+            local platform = createPlatform(safeCFrame.Position)
+            
+            local activeBoss = viciousSpike
+            while activeBoss and activeBoss.Parent do
+                task.wait(0.5)
+                activeBoss = scanDataForVicious() or activeBoss
                 if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                    LocalPlayer.Character.HumanoidRootPart.CFrame = spikeCFrame + Vector3.new(0, 3, 0)
+                    local bossPos = activeBoss:IsA("Model") and activeBoss:GetPivot().Position or (activeBoss:IsA("BasePart") and activeBoss.Position or spikeCFrame.Position)
+                    LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(bossPos + Vector3.new(0, 30, 0))
+                    platform.Position = (bossPos + Vector3.new(0, 30, 0)) - Vector3.new(0, 3.5, 0)
                 end
-            else
-                Log("Boss didn't spawn or died instantly.", "WARN")
+            end
+            
+            Log("Target eliminated! Collecting...", "SUCCESS")
+            platform:Destroy()
+            
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                LocalPlayer.Character.HumanoidRootPart.CFrame = spikeCFrame + Vector3.new(0, 3, 0)
             end
             
             task.wait(3) 
