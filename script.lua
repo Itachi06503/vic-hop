@@ -49,7 +49,7 @@ MainFrame.Draggable = true
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 25)
 Title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Title.Text = " 🐝 Vic Hop Console (Final Fix)"
+Title.Text = " 🐝 Vic Hop Console (Tween Claim)"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Font = Enum.Font.Code
@@ -156,7 +156,7 @@ end)
 GuiService.ErrorMessageChanged:Connect(function() task.wait(5); isHopping = false; serverHop() end)
 
 -------------------------------------------------------------------------------
--- 2. UTILITY FUNCTIONS (Fixed Hive Claimer)
+-- 2. UTILITY FUNCTIONS
 -------------------------------------------------------------------------------
 local function scanDataForVicious()
     local targetFolders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
@@ -172,6 +172,18 @@ local function scanDataForVicious()
     return nil
 end
 
+-- Moved tweenTo ABOVE claimHiveAndWait so we can use it!
+local function tweenTo(targetCFrame)
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    local distance = (root.Position - targetCFrame.Position).Magnitude
+    local tweenInfo = TweenInfo.new(distance / 45, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(root, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+    tween.Completed:Wait()
+    task.wait(0.5)
+end
+
 local function claimHiveAndWait()
     local honeycombs = Workspace:WaitForChild("Honeycombs", 5)
     if not honeycombs then return false end
@@ -185,29 +197,34 @@ local function claimHiveAndWait()
         end
     end
     
-    Log("Attempting to claim hive...", "WARN")
+    Log("Tweening to empty hive to claim...", "WARN")
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return false end
     
-    -- 2. Try to claim an empty one
+    -- 2. Find and tween to an empty one
     for _, hive in ipairs(honeycombs:GetChildren()) do
         local owner = hive:FindFirstChild("Owner")
         if owner and owner.Value == nil then
             local pad = hive:FindFirstChild("SpawnPos")
             local hiveID = hive:FindFirstChild("HiveID")
             
-            if pad and hiveID then
-                -- Send the proper ID NUMBER to the server
-                pcall(function() 
-                    game:GetService("ReplicatedStorage").Events.ClaimHive:InvokeServer(tonumber(hiveID.Value)) 
-                end)
+            if pad then
+                -- Tween directly to the pad smoothly
+                tweenTo(pad.CFrame + Vector3.new(0, 3, 0))
                 
-                -- Teleport to the pad directly as a physical backup
-                root.CFrame = pad.CFrame
-                task.wait(0.2)
-                root.CFrame = pad.CFrame + Vector3.new(0, 3, 0)
+                -- Drop onto it gently to trigger the game's physical touch
+                root.CFrame = pad.CFrame + Vector3.new(0, 1.5, 0)
                 
-                -- Give the server 1.5 seconds to register the bees spawning
+                -- Wait 2 full seconds for the game to register the claim
+                task.wait(2)
+                
+                -- Send the backup server command just in case
+                if hiveID then
+                    pcall(function() 
+                        game:GetService("ReplicatedStorage").Events.ClaimHive:InvokeServer(tonumber(hiveID.Value)) 
+                    end)
+                end
+                
                 task.wait(1.5)
                 
                 if owner.Value == LocalPlayer then
@@ -219,17 +236,6 @@ local function claimHiveAndWait()
     end
     
     return false
-end
-
-local function tweenTo(targetCFrame)
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-    local distance = (root.Position - targetCFrame.Position).Magnitude
-    local tweenInfo = TweenInfo.new(distance / 45, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(root, tweenInfo, {CFrame = targetCFrame})
-    tween:Play()
-    tween.Completed:Wait()
-    task.wait(0.5)
 end
 
 local function createPlatform(position)
