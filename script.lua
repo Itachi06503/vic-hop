@@ -7,7 +7,7 @@ local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 
--- 1. Scan for Vicious Bee
+-- 1. Scan for Vicious Bee FIRST
 local function scanDataForVicious()
     local targetFolders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
     for _, folder in ipairs(targetFolders) do
@@ -22,8 +22,41 @@ local function scanDataForVicious()
     return nil
 end
 
--- 2. Server Hopping Logic
+-- 2. Secure Hive Claiming Logic
+local function claimHiveAndWait()
+    local honeycombs = Workspace:WaitForChild("Honeycombs", 5)
+    if not honeycombs then return false end
+    
+    for _, hive in ipairs(honeycombs:GetChildren()) do
+        local owner = hive:FindFirstChild("Owner")
+        
+        if owner and owner.Value == nil then
+            local pad = hive:FindFirstChild("SpawnPos")
+            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            
+            if pad and root then
+                -- Teleport to the empty hive
+                root.CFrame = pad.CFrame
+                
+                -- Wait until the game successfully registers you as the owner
+                local timeout = tick() + 5 -- 5 second timeout so it doesn't get stuck
+                while tick() < timeout do
+                    if owner.Value == LocalPlayer then
+                        -- Hive claimed! Wait 3 seconds for bees to fully spawn out of the honeycomb
+                        task.wait(3)
+                        return true
+                    end
+                    task.wait(0.2)
+                end
+            end
+        end
+    end
+    return false
+end
+
+-- 3. Server Hopping Logic
 local function serverHop()
+    print("Hopping servers...")
     local serversApi = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
     local success, result = pcall(function() return HttpService:JSONDecode(game:HttpGet(serversApi)) end)
     
@@ -40,27 +73,27 @@ local function serverHop()
     end
 end
 
--- 3. Smooth Tween Function
+-- 4. Smooth Tween Function
 local function tweenTo(targetCFrame)
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
     
-    -- Calculate time based on distance so it doesn't move dangerously fast
     local distance = (root.Position - targetCFrame.Position).Magnitude
-    local tweenTime = distance / 45 -- Speed: 45 studs per second
+    local tweenTime = distance / 45 
     
     local tweenInfo = TweenInfo.new(tweenTime, Enum.EasingStyle.Linear)
     local tween = TweenService:Create(root, tweenInfo, {CFrame = targetCFrame})
     
     tween:Play()
     tween.Completed:Wait()
+    task.wait(0.5) -- Give bees a tiny moment to catch up after traveling
 end
 
--- 4. Create an invisible platform to stand on
+-- 5. Create floating platform
 local function createPlatform(position)
     local part = Instance.new("Part")
-    part.Size = Vector3.new(10, 1, 10)
-    part.Position = position - Vector3.new(0, 3.5, 0) -- Placed just under your feet
+    part.Size = Vector3.new(15, 1, 15) -- Made it slightly wider too
+    part.Position = position - Vector3.new(0, 3.5, 0)
     part.Anchored = true
     part.Transparency = 1
     part.CanCollide = true
@@ -71,35 +104,49 @@ end
 -- Main Execution Thread
 task.spawn(function()
     if not LocalPlayer.Character then LocalPlayer.CharacterAdded:Wait() end
-    task.wait(3) 
-
+    task.wait(3) -- Let map load
+    
+    -- Step 1: Scan for Vicious Bee immediately
     local viciousSpike = scanDataForVicious()
     
     if viciousSpike then
-        -- Vicious Bee found! Calculate a safe hovering position (18 studs above it)
-        local safeCFrame = (viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame) + Vector3.new(0, 18, 0)
+        print("Vicious Bee found! Claiming hive...")
         
-        -- Tween smoothly to the target to avoid anti-cheat
-        tweenTo(safeCFrame)
+        -- Step 2: Claim hive and wait for bees to spawn
+        local claimed = claimHiveAndWait()
         
-        -- Create a floating platform so you don't fall into the stinger hitbox
-        local platform = createPlatform(safeCFrame.Position)
-        
-        -- Wait for the Vicious Bee to die (Its model will be removed from Workspace)
-        while viciousSpike and viciousSpike.Parent do
-            task.wait(0.5)
-            -- Keeps you locked in place just in case
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                LocalPlayer.Character.HumanoidRootPart.CFrame = safeCFrame
+        if claimed then
+            -- Step 3: Calculate safe height (Increased to 30 studs to avoid damage)
+            local targetPivot = viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame
+            local safeCFrame = targetPivot + Vector3.new(0, 30, 0)
+            
+            -- Step 4: Tween to the boss so bees follow, then create platform
+            tweenTo(safeCFrame)
+            local platform = createPlatform(safeCFrame.Position)
+            
+            -- Keep character exactly in place and wait for it to die
+            while viciousSpike and viciousSpike.Parent do
+                task.wait(0.5)
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    LocalPlayer.Character.HumanoidRootPart.CFrame = safeCFrame
+                end
             end
+            
+            -- Vicious Bee died!
+            platform:Destroy()
+            
+            -- Drop down slightly to grab the Stingers, wait 2 seconds, then hop!
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                LocalPlayer.Character.HumanoidRootPart.CFrame = targetPivot + Vector3.new(0, 5, 0)
+            end
+            task.wait(2) 
+            serverHop()
+        else
+            -- If it failed to claim a hive for some reason, just hop to avoid getting stuck
+            serverHop()
         end
-        
-        -- It died! Clean up the platform and immediately hop to farm the next one
-        platform:Destroy()
-        task.wait(1) -- Brief pause to ensure token collection (stingers) finishes
-        serverHop()
     else
-        -- No Vicious Bee found, immediately server hop
+        -- No Vicious Bee found, immediately hop
         serverHop()
     end
 end)
