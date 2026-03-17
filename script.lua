@@ -23,9 +23,8 @@ pcall(function()
 end)
 
 -------------------------------------------------------------------------------
--- 0. ON-SCREEN CONSOLE UI (Delta-Optimized & Auto-Cleaning)
+-- 0. ON-SCREEN CONSOLE UI (Delta-Optimized)
 -------------------------------------------------------------------------------
--- Clean up old GUIs if you re-execute the script
 pcall(function()
     local hiddenGui = gethui()
     for _, v in pairs(hiddenGui:GetChildren()) do
@@ -115,7 +114,7 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. SMART SERVER HOPPING (Fixed for Empty Servers)
+-- 2. SMART SERVER HOPPING (With Random Fallback)
 -------------------------------------------------------------------------------
 local isHopping = false
 local function serverHop()
@@ -140,7 +139,6 @@ local function serverHop()
         if success and result and result.data then
             local availableServers = {}
             for _, server in ipairs(result.data) do
-                -- Join any server that isn't completely maxed out
                 if server.playing and server.playing < server.maxPlayers and server.id ~= game.JobId and not visitedServers[server.id] then
                     table.insert(availableServers, server)
                 end
@@ -153,12 +151,13 @@ local function serverHop()
                 Log("Teleporting -> " .. chosenServer.playing .. "/" .. chosenServer.maxPlayers .. " players", "SUCCESS")
                 task.wait(1)
                 TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
-            else
-                Log("No safe servers found. Retrying...", "WARN")
+                return -- Stop here if successful
             end
-        else
-            Log("Failed to read server list. Retrying...", "ERROR")
         end
+        
+        -- If API fails or no servers found, FORCE a random hop so we don't get stuck
+        Log("No specific servers found. Random Hopping...", "WARN")
+        TeleportService:Teleport(PlaceId, LocalPlayer)
         
         task.wait(10)
         isHopping = false
@@ -192,7 +191,7 @@ GuiService.ErrorMessageChanged:Connect(function(errMsg)
 end)
 
 -------------------------------------------------------------------------------
--- 5. UTILITY FUNCTIONS
+-- 5. UTILITY FUNCTIONS (Fixed Hive Claiming)
 -------------------------------------------------------------------------------
 local function scanDataForVicious()
     local targetFolders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
@@ -212,18 +211,31 @@ local function claimHiveAndWait()
     local honeycombs = Workspace:WaitForChild("Honeycombs", 5)
     if not honeycombs then return false end
     
+    -- STEP 1: Check if we ALREADY own a hive
+    for _, hive in ipairs(honeycombs:GetChildren()) do
+        local owner = hive:FindFirstChild("Owner")
+        if owner and owner.Value == LocalPlayer then
+            Log("Already own a hive! Ready to fight.", "SUCCESS")
+            return true
+        end
+    end
+    
+    -- STEP 2: If we don't own one, try to claim one
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    
     for _, hive in ipairs(honeycombs:GetChildren()) do
         local owner = hive:FindFirstChild("Owner")
         if owner and owner.Value == nil then
             local pad = hive:FindFirstChild("SpawnPos")
-            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if pad and root then
-                root.CFrame = pad.CFrame
-                local timeout = tick() + 5 
+            if pad then
+                -- Drop slightly above the pad so the physics engine registers the touch
+                root.CFrame = pad.CFrame + Vector3.new(0, 3, 0)
+                local timeout = tick() + 4 
                 while tick() < timeout do
                     if owner.Value == LocalPlayer then
-                        Log("Hive claimed. Waiting 3s for bees...", "SUCCESS")
-                        task.wait(3) 
+                        Log("Hive successfully claimed!", "SUCCESS")
+                        task.wait(2) 
                         return true
                     end
                     task.wait(0.2)
