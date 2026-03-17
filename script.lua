@@ -32,8 +32,8 @@ local successUI = pcall(function() ScreenGui.Parent = gethui() end)
 if not successUI then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui", 5) end
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 220, 0, 40)
-MainFrame.Position = UDim2.new(0.5, -110, 0, 20) 
+MainFrame.Size = UDim2.new(0, 240, 0, 40)
+MainFrame.Position = UDim2.new(0.5, -120, 0, 20) 
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BackgroundTransparency = 0.3
 MainFrame.BorderSizePixel = 2
@@ -130,16 +130,34 @@ GuiService.ErrorMessageChanged:Connect(function()
 end)
 
 -------------------------------------------------------------------------------
--- 5. MAIN LOOP
+-- 5. MAIN LOOP & ATLAS INJECTOR
 -------------------------------------------------------------------------------
+local atlasLoaded = false
+
 task.spawn(function()
     while true do
         task.wait(3) -- Check every 3 seconds
         if isHopping then continue end
         
         if isViciousAlive() then
-            StatusLabel.Text = "Vicious Found! Staying..."
-            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80) -- Green
+            if not atlasLoaded then
+                StatusLabel.Text = "Vicious Found! Loading Atlas..."
+                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80) -- Green
+                atlasLoaded = true -- Set the lock so it only loads Atlas once
+                
+                -- ========================================================
+                -- ATLAS HUB INJECTOR
+                -- ========================================================
+                task.spawn(function()
+                    pcall(function()
+                        loadstring(game:HttpGet("https://raw.githubusercontent.com/Chris12089/atlasbss/main/script.lua"))()
+                    end)
+                end)
+                -- ========================================================
+                
+            else
+                StatusLabel.Text = "Atlas Active. Fighting Vicious..."
+            end
         else
             StatusLabel.Text = "Verifying empty server..."
             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80) -- Orange
