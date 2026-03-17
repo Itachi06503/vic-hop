@@ -98,7 +98,7 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. SMART SERVER HOPPING (Fixed for Delta)
+-- 2. SMART SERVER HOPPING (Fixed for Empty Servers)
 -------------------------------------------------------------------------------
 local isHopping = false
 local function serverHop()
@@ -109,7 +109,8 @@ local function serverHop()
     Log("Searching for a new server...", "INFO")
     
     task.spawn(function()
-        local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Desc&limit=100"
+        -- Changed to Asc to find servers with LESS people first!
+        local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100"
         
         local success, result = pcall(function() 
             if fetchReq then
@@ -123,7 +124,8 @@ local function serverHop()
         if success and result and result.data then
             local availableServers = {}
             for _, server in ipairs(result.data) do
-                if server.playing <= (server.maxPlayers - 2) and server.id ~= game.JobId and not visitedServers[server.id] then
+                -- Changed to < maxPlayers so it accepts servers with 5/6 players
+                if server.playing and server.playing < server.maxPlayers and server.id ~= game.JobId and not visitedServers[server.id] then
                     table.insert(availableServers, server)
                 end
             end
@@ -232,3 +234,59 @@ local function createPlatform(position)
     part.Size = Vector3.new(15, 1, 15)
     part.Position = position - Vector3.new(0, 3.5, 0)
     part.Anchored = true
+    part.Transparency = 1
+    part.CanCollide = true
+    part.Parent = Workspace
+    return part
+end
+
+-------------------------------------------------------------------------------
+-- 6. MAIN EXECUTION THREAD
+-------------------------------------------------------------------------------
+task.spawn(function()
+    while not LocalPlayer.Character do task.wait(0.5) end
+    task.wait(2) 
+    
+    Log("Scanning for Vicious Bee...", "INFO")
+    local viciousSpike = scanDataForVicious()
+    
+    if viciousSpike then
+        Log("Vicious Bee located!", "SUCCESS")
+        
+        if claimHiveAndWait() then
+            scriptState = "FIGHTING"
+            fightStartTime = tick()
+            Log("Tweening to boss safely...", "INFO")
+            
+            local targetPivot = viciousSpike:IsA("Model") and viciousSpike:GetPivot() or viciousSpike.CFrame
+            local safeCFrame = targetPivot + Vector3.new(0, 30, 0) 
+            
+            tweenTo(safeCFrame)
+            local platform = createPlatform(safeCFrame.Position)
+            Log("Hovering at 30 studs. Fighting...", "WARN")
+            
+            while viciousSpike and viciousSpike.Parent do
+                task.wait(0.5)
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    LocalPlayer.Character.HumanoidRootPart.CFrame = safeCFrame
+                end
+            end
+            
+            Log("Boss defeated! Collecting stingers...", "SUCCESS")
+            platform:Destroy()
+            
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                LocalPlayer.Character.HumanoidRootPart.CFrame = targetPivot + Vector3.new(0, 5, 0)
+            end
+            
+            task.wait(2) 
+            serverHop()
+        else
+            Log("Failed to claim hive. Hopping...", "ERROR")
+            serverHop()
+        end
+    else
+        Log("No Vicious Bee found. Hopping...", "WARN")
+        serverHop()
+    end
+end)
