@@ -1,3 +1,6 @@
+-- Wait for the game to fully load before Delta does anything
+if not game:IsLoaded() then game.Loaded:Wait() end
+
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
@@ -13,12 +16,26 @@ local visitedServers = {}
 local scriptState = "SCANNING"
 local fightStartTime = 0
 
--- Find the correct executor HTTP request function
-local fetchReq = request or http_request or (http and http.request) or (syn and syn.request)
+-- Find the correct executor HTTP request function safely
+local fetchReq = nil
+pcall(function()
+    fetchReq = request or http_request or (http and http.request) or (syn and syn.request)
+end)
 
 -------------------------------------------------------------------------------
--- 0. ON-SCREEN CONSOLE UI (Delta-Optimized)
+-- 0. ON-SCREEN CONSOLE UI (Delta-Optimized & Auto-Cleaning)
 -------------------------------------------------------------------------------
+-- Clean up old GUIs if you re-execute the script
+pcall(function()
+    local hiddenGui = gethui()
+    for _, v in pairs(hiddenGui:GetChildren()) do
+        if v.Name == "VicHopConsole" then v:Destroy() end
+    end
+    for _, v in pairs(LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do
+        if v.Name == "VicHopConsole" then v:Destroy() end
+    end
+end)
+
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "VicHopConsole"
 ScreenGui.ResetOnSpawn = false
@@ -109,7 +126,6 @@ local function serverHop()
     Log("Searching for a new server...", "INFO")
     
     task.spawn(function()
-        -- Changed to Asc to find servers with LESS people first!
         local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100"
         
         local success, result = pcall(function() 
@@ -124,7 +140,7 @@ local function serverHop()
         if success and result and result.data then
             local availableServers = {}
             for _, server in ipairs(result.data) do
-                -- Changed to < maxPlayers so it accepts servers with 5/6 players
+                -- Join any server that isn't completely maxed out
                 if server.playing and server.playing < server.maxPlayers and server.id ~= game.JobId and not visitedServers[server.id] then
                     table.insert(availableServers, server)
                 end
