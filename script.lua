@@ -49,7 +49,7 @@ MainFrame.Draggable = true
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 25)
 Title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Title.Text = " 🐝 Vic Hop Console (User Claim Method)"
+Title.Text = " 🐝 Vic Hop Console (Real Remote Claim)"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Font = Enum.Font.Code
@@ -189,7 +189,7 @@ local function tweenTo(targetCFrame)
 end
 
 -- ============================================================================
--- USER PROVIDED CLAIM LOGIC
+-- USER PROVIDED REAL REMOTE CLAIM LOGIC
 -- ============================================================================
 local function claimHiveAndWait()
     local honeycombs = Workspace:FindFirstChild("Honeycombs")
@@ -204,7 +204,7 @@ local function claimHiveAndWait()
         end
     end
     
-    Log("Running custom claim method...", "WARN")
+    Log("Running exact Remote Spy code...", "WARN")
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return false end
     
@@ -224,18 +224,21 @@ local function claimHiveAndWait()
                 
                 task.wait(0.5)
                 
-                -- Fire the claim remote event based on your code
+                -- The exact code you provided:
                 pcall(function()
-                    ReplicatedStorage.Events.ClaimHive:FireServer(hiveID.Value)
+                    local args = {
+                        [1] = tonumber(hiveID.Value)
+                    }
+                    ReplicatedStorage:WaitForChild("Events"):WaitForChild("ClaimHive"):FireServer(unpack(args))
                 end)
                 
                 task.wait(1.5) -- Give the server a moment to register
                 
                 if owner.Value == LocalPlayer then
-                    Log("Hive claimed successfully via custom code!", "SUCCESS")
+                    Log("Hive claimed successfully via exact Remote!", "SUCCESS")
                     return true
                 end
-                break -- Break the loop after trying an empty pad, just like your code did
+                break -- Break the loop after trying an empty pad
             end
         end
     end
