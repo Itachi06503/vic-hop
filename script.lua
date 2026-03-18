@@ -1,6 +1,6 @@
 -- Wait for the game to fully load
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(15)
+task.wait(10)
 
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
@@ -12,12 +12,10 @@ local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 
--- Attempt to find the correct HTTP request function for your executor
-local fetchReq = nil
-pcall(function() fetchReq = request or http_request or (http and http.request) or (syn and syn.request) end)
+local fetchReq = (request or http_request or (syn and syn.request))
 
 -------------------------------------------------------------------------------
--- 1. DRAGGABLE STATUS UI
+-- 1. SIMPLE DRAGGABLE UI
 -------------------------------------------------------------------------------
 pcall(function()
     local hiddenGui = gethui and gethui() or CoreGui
@@ -28,9 +26,8 @@ end)
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "VicDetectorUI"
 ScreenGui.ResetOnSpawn = false
-
-local successUI = pcall(function() ScreenGui.Parent = gethui() end)
-if not successUI then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui", 5) end
+pcall(function() ScreenGui.Parent = gethui() end)
+if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui", 5) end
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 240, 0, 40)
@@ -45,143 +42,86 @@ MainFrame.Draggable = true
 local StatusLabel = Instance.new("TextLabel", MainFrame)
 StatusLabel.Size = UDim2.new(1, 0, 1, 0)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Scanning for Vicious..."
+StatusLabel.Text = "Starting up..."
 StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLabel.Font = Enum.Font.Code
 StatusLabel.TextSize = 14
 StatusLabel.TextWrapped = true
 
 -------------------------------------------------------------------------------
--- 2. GLOBAL COOLDOWN, STATE & CACHE
+-- 2. BASIC SERVER HOPPING
 -------------------------------------------------------------------------------
 local isHopping = false
-local globalCooldown = 0 
-local badServers = {} 
-local lastAttemptedServer = nil
-local savedCursor = "" 
 
--- THE SECRET STASH: This will store extra servers to use when we get rate-limited
-local backupServerCache = {} 
-
-badServers[game.JobId] = true 
-
-local function setCooldown(seconds, message)
-    globalCooldown = os.time() + seconds
-    isHopping = false
-    StatusLabel.Text = message
-    StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-end
-
--------------------------------------------------------------------------------
--- 3. THE CACHE-BASED HOPPING LOGIC
--------------------------------------------------------------------------------
-local function serverHop()
+local function randomServerHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Fetching Servers..."
+    StatusLabel.Text = "Finding random server..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
-        local availableServers = {}
-        local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Desc&limit=100"
+        -- Randomize Asc/Desc to mix up the results without needing pagination
+        local sort = (math.random() > 0.5) and "Asc" or "Desc"
+        local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sort .. "&limit=100"
         
-        if savedCursor and savedCursor ~= "" then
-            serversApi = serversApi .. "&cursor=" .. savedCursor
-        else
-            serversApi = serversApi .. "&_b=" .. tostring(os.time())
-        end
-        
-        local success, result = pcall(function() 
+        local success, result = pcall(function()
             if fetchReq then
-                local response = fetchReq({Url = serversApi, Method = "GET"})
-                if response.StatusCode == 429 then return "RATELIMIT" end
-                return HttpService:JSONDecode(response.Body)
+                local res = fetchReq({Url = url, Method = "GET"})
+                if res.StatusCode == 429 then return "RATELIMIT" end
+                return HttpService:JSONDecode(res.Body)
             else
-                return HttpService:JSONDecode(game:HttpGet(serversApi)) 
+                return HttpService:JSONDecode(game:HttpGet(url))
             end
         end)
         
-        -- IF WE ARE RATE LIMITED: Use the Backup Cache instead of Blind Hopping!
-        if result == "RATELIMIT" or not success then
-            if #backupServerCache > 0 then
-                StatusLabel.Text = "API Blocked! Using Cache (" .. #backupServerCache .. " left)"
-                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255) -- Cyan for Cache hop
-                task.wait(2)
-                
-                -- Pull a random server from our stash and remove it so we don't reuse it
-                local cacheIndex = math.random(1, #backupServerCache)
-                local cacheServerId = table.remove(backupServerCache, cacheIndex)
-                lastAttemptedServer = cacheServerId
-                
-                pcall(function() TeleportService:TeleportCancel() end)
-                TeleportService:TeleportToPlaceInstance(PlaceId, cacheServerId, LocalPlayer)
-                
-                task.wait(20)
-                if isHopping then
-                    badServers[lastAttemptedServer] = true
-                    setCooldown(10, "Cache Hop stalled! Retrying...")
+        if result == "RATELIMIT" then
+            StatusLabel.Text = "Rate Limited. Waiting 15s..."
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            task.wait(15)
+            isHopping = false
+            return
+        end
+        
+        if success and type(result) == "table" and result.data then
+            local validServers = {}
+            for _, srv in ipairs(result.data) do
+                if srv.playing and srv.playing < (srv.maxPlayers - 1) and srv.id ~= game.JobId then
+                    table.insert(validServers, srv.id)
                 end
-                return
+            end
+            
+            if #validServers > 0 then
+                local randomId = validServers[math.random(1, #validServers)]
+                StatusLabel.Text = "Teleporting..."
+                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+                
+                TeleportService:TeleportToPlaceInstance(PlaceId, randomId, LocalPlayer)
+                
+                -- Wait 15 seconds for TP to happen. If it fails, reset hopping status.
+                task.wait(15)
+                isHopping = false 
             else
-                -- If we somehow run out of cached servers AND are rate limited, we must wait to avoid a kick.
-                setCooldown(30, "Cache Empty & Blocked! Waiting 30s...")
-                return
-            end
-        end
-        
-        -- IF API IS WORKING: Save the servers to our Stash!
-        if type(result) == "table" and result.data then
-            savedCursor = result.nextPageCursor or "" 
-            
-            for _, server in ipairs(result.data) do
-                if server.playing and server.playing >= 1 and server.playing < (server.maxPlayers - 2) and not badServers[server.id] then
-                    table.insert(availableServers, server)
-                    
-                    -- Add to our secret stash for later (keep stash under 500 to avoid memory lag)
-                    if #backupServerCache < 500 then
-                        table.insert(backupServerCache, server.id)
-                    end
-                end
-            end
-        end
-        
-        if #availableServers > 0 then
-            local chosenServer = availableServers[math.random(1, #availableServers)]
-            lastAttemptedServer = chosenServer.id
-            
-            StatusLabel.Text = "Teleporting..."
-            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-            
-            pcall(function() TeleportService:TeleportCancel() end)
-            task.wait(1)
-            
-            TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
-            
-            task.wait(20)
-            if isHopping then
-                badServers[lastAttemptedServer] = true
-                setCooldown(10, "Teleport stalled! Blacklisting...")
+                StatusLabel.Text = "No open servers. Retrying..."
+                task.wait(5)
+                isHopping = false
             end
         else
-            setCooldown(5, "Page empty! Next page...")
+            StatusLabel.Text = "API Error. Retrying..."
+            task.wait(5)
+            isHopping = false
         end
     end)
 end
 
 -------------------------------------------------------------------------------
--- 4. CLEAN ERROR CATCHERS
+-- 3. SIMPLE ERROR CLEARING
 -------------------------------------------------------------------------------
+-- If teleport fails, immediately allow hopping again
 TeleportService.TeleportInitFailed:Connect(function()
-    if lastAttemptedServer then badServers[lastAttemptedServer] = true end
-    setCooldown(10, "Teleport Blocked! Blacklisted.")
+    isHopping = false
 end)
 
-GuiService.ErrorMessageChanged:Connect(function()
-    if lastAttemptedServer then badServers[lastAttemptedServer] = true end
-    pcall(function() GuiService:ClearError() end) 
-    setCooldown(10, "Error Cleared! Blacklisted.")
-end)
-
+-- Auto-close Roblox error prompts
 task.spawn(function()
     while task.wait(2) do
         pcall(function()
@@ -189,10 +129,8 @@ task.spawn(function()
             if promptUI then
                 local overlay = promptUI:FindFirstChild("promptOverlay")
                 if overlay and overlay:FindFirstChild("ErrorPrompt") and overlay.ErrorPrompt.Visible then
-                    if lastAttemptedServer then badServers[lastAttemptedServer] = true end
-                    pcall(function() GuiService:ClearError() end)
-                    overlay.ErrorPrompt.Visible = false 
-                    setCooldown(10, "Prompt Killed! Blacklisted.")
+                    GuiService:ClearError()
+                    isHopping = false -- Reset hop status so it tries again
                 end
             end
         end)
@@ -200,7 +138,7 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 5. VICIOUS BEE DETECTOR
+-- 4. VICIOUS CHECK & MAIN LOOP
 -------------------------------------------------------------------------------
 local function isViciousAlive()
     local targetFolders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
@@ -216,21 +154,10 @@ local function isViciousAlive()
     return false
 end
 
--------------------------------------------------------------------------------
--- 6. MAIN LOOP & ATLAS INJECTOR
--------------------------------------------------------------------------------
 local atlasLoaded = false
 
 task.spawn(function()
-    while true do
-        task.wait(2) 
-        
-        if os.time() < globalCooldown then
-            StatusLabel.Text = "Cooldown: " .. (globalCooldown - os.time()) .. "s"
-            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-            continue
-        end
-        
+    while task.wait(3) do
         if isHopping then continue end
         
         if isViciousAlive() then
@@ -239,21 +166,19 @@ task.spawn(function()
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
                 atlasLoaded = true 
                 
-                task.spawn(function()
-                    pcall(function()
-                        loadstring(game:HttpGet("https://raw.githubusercontent.com/Chris12089/atlasbss/main/script.lua"))()
-                    end)
+                pcall(function()
+                    loadstring(game:HttpGet("https://raw.githubusercontent.com/Chris12089/atlasbss/main/script.lua"))()
                 end)
             else
                 StatusLabel.Text = "Atlas Active. Fighting Vicious..."
             end
         else
-            StatusLabel.Text = "Verifying empty server..."
+            StatusLabel.Text = "No Vicious. Preparing to hop..."
             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
-            task.wait(5) 
+            task.wait(2) 
             
-            if not isViciousAlive() and not isHopping and os.time() >= globalCooldown then
-                serverHop()
+            if not isViciousAlive() and not isHopping then
+                randomServerHop()
             end
         end
     end
