@@ -52,7 +52,7 @@ StatusLabel.TextSize = 14
 StatusLabel.TextWrapped = true
 
 -------------------------------------------------------------------------------
--- 2. GLOBAL COOLDOWN, STATE & BLACKLIST
+-- 2. GLOBAL COOLDOWN, STATE & CACHE
 -------------------------------------------------------------------------------
 local isHopping = false
 local globalCooldown = 0 
@@ -60,7 +60,10 @@ local badServers = {}
 local lastAttemptedServer = nil
 local savedCursor = "" 
 
-badServers[game.JobId] = true -- Immediately blacklist our current server
+-- THE SECRET STASH: This will store extra servers to use when we get rate-limited
+local backupServerCache = {} 
+
+badServers[game.JobId] = true 
 
 local function setCooldown(seconds, message)
     globalCooldown = os.time() + seconds
@@ -70,12 +73,12 @@ local function setCooldown(seconds, message)
 end
 
 -------------------------------------------------------------------------------
--- 3. THE HYBRID HOPPING LOGIC (WITH BLIND FALLBACK)
+-- 3. THE CACHE-BASED HOPPING LOGIC
 -------------------------------------------------------------------------------
 local function serverHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Searching Page..."
+    StatusLabel.Text = "Fetching Servers..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
@@ -98,28 +101,46 @@ local function serverHop()
             end
         end)
         
-        -- THE FIX: If we hit a Rate Limit, trigger the Emergency Blind Hop
+        -- IF WE ARE RATE LIMITED: Use the Backup Cache instead of Blind Hopping!
         if result == "RATELIMIT" or not success then
-            StatusLabel.Text = "API Blocked! Forcing Blind Hop..."
-            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-            task.wait(2)
-            
-            pcall(function() TeleportService:TeleportCancel() end)
-            TeleportService:Teleport(PlaceId, LocalPlayer)
-            
-            task.wait(20)
-            if isHopping then
-                setCooldown(10, "Blind Hop stalled! Retrying...")
+            if #backupServerCache > 0 then
+                StatusLabel.Text = "API Blocked! Using Cache (" .. #backupServerCache .. " left)"
+                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255) -- Cyan for Cache hop
+                task.wait(2)
+                
+                -- Pull a random server from our stash and remove it so we don't reuse it
+                local cacheIndex = math.random(1, #backupServerCache)
+                local cacheServerId = table.remove(backupServerCache, cacheIndex)
+                lastAttemptedServer = cacheServerId
+                
+                pcall(function() TeleportService:TeleportCancel() end)
+                TeleportService:TeleportToPlaceInstance(PlaceId, cacheServerId, LocalPlayer)
+                
+                task.wait(20)
+                if isHopping then
+                    badServers[lastAttemptedServer] = true
+                    setCooldown(10, "Cache Hop stalled! Retrying...")
+                end
+                return
+            else
+                -- If we somehow run out of cached servers AND are rate limited, we must wait to avoid a kick.
+                setCooldown(30, "Cache Empty & Blocked! Waiting 30s...")
+                return
             end
-            return
         end
         
+        -- IF API IS WORKING: Save the servers to our Stash!
         if type(result) == "table" and result.data then
             savedCursor = result.nextPageCursor or "" 
             
             for _, server in ipairs(result.data) do
                 if server.playing and server.playing >= 1 and server.playing < (server.maxPlayers - 2) and not badServers[server.id] then
                     table.insert(availableServers, server)
+                    
+                    -- Add to our secret stash for later (keep stash under 500 to avoid memory lag)
+                    if #backupServerCache < 500 then
+                        table.insert(backupServerCache, server.id)
+                    end
                 end
             end
         end
