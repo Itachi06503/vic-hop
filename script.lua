@@ -1,6 +1,6 @@
 -- Wait for the game to fully load
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(15) -- Give Roblox extra time to register you
+task.wait(15)
 
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
@@ -52,10 +52,14 @@ StatusLabel.TextSize = 14
 StatusLabel.TextWrapped = true
 
 -------------------------------------------------------------------------------
--- 2. GLOBAL COOLDOWN & STATE
+-- 2. GLOBAL COOLDOWN, STATE & BLACKLIST
 -------------------------------------------------------------------------------
 local isHopping = false
-local globalCooldown = 0 -- Uses os.time() to enforce strict waiting
+local globalCooldown = 0 
+local badServers = {} -- This memory bank tracks broken servers
+local lastAttemptedServer = nil
+
+badServers[game.JobId] = true -- Immediately blacklist our current server
 
 local function setCooldown(seconds, message)
     globalCooldown = os.time() + seconds
@@ -76,7 +80,6 @@ local function serverHop()
     task.spawn(function()
         local chosenServer = nil
         
-        -- Cache Buster: Generates a random string to trick the executor into fetching fresh data
         local cacheBuster = tostring(math.random(100000, 999999)) .. tostring(os.time())
         local sortOrder = (math.random(1, 2) == 1) and "Asc" or "Desc"
         local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100&_buster=" .. cacheBuster
@@ -94,7 +97,8 @@ local function serverHop()
         if success and type(result) == "table" and result.data then
             local availableServers = {}
             for _, server in ipairs(result.data) do
-                if server.playing and server.playing < (server.maxPlayers - 2) and server.id ~= game.JobId then
+                -- Skip full servers AND skip any server on our Blacklist
+                if server.playing and server.playing < (server.maxPlayers - 2) and not badServers[server.id] then
                     table.insert(availableServers, server)
                 end
             end
@@ -108,19 +112,20 @@ local function serverHop()
         end
         
         if chosenServer then
+            lastAttemptedServer = chosenServer.id -- Save ID in case it fails
             StatusLabel.Text = "Teleporting..."
             StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
             
-            -- Clear any hanging teleport states before attempting
             pcall(function() TeleportService:TeleportCancel() end)
             task.wait(1)
             
             TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
             
-            -- Timeout failsafe
             task.wait(20)
             if isHopping then
-                setCooldown(10, "Teleport stalled! Retrying...")
+                -- If we are still here after 20s, the server was bad. Blacklist it.
+                badServers[lastAttemptedServer] = true
+                setCooldown(10, "Teleport stalled! Blacklisting...")
             end
         else
             setCooldown(15, "API Empty! Waiting 15s...")
@@ -129,24 +134,34 @@ local function serverHop()
 end
 
 -------------------------------------------------------------------------------
--- 4. CLEAN ERROR CATCHERS (NO LOOPS)
+-- 4. CLEAN ERROR CATCHERS (WITH AUTO-CLOSER & BLACKLISTER)
 -------------------------------------------------------------------------------
 TeleportService.TeleportInitFailed:Connect(function()
-    setCooldown(15, "Teleport Blocked! Cooldown 15s...")
+    if lastAttemptedServer then badServers[lastAttemptedServer] = true end
+    setCooldown(10, "Teleport Blocked! Blacklisted.")
 end)
 
 GuiService.ErrorMessageChanged:Connect(function()
-    setCooldown(15, "Error Prompt! Cooldown 15s...")
+    if lastAttemptedServer then badServers[lastAttemptedServer] = true end
+    pcall(function() GuiService:ClearError() end) -- Closes the error automatically
+    setCooldown(10, "Error Cleared! Blacklisted.")
 end)
 
 task.spawn(function()
-    while task.wait(3) do
+    while task.wait(2) do
         pcall(function()
             local promptUI = CoreGui:FindFirstChild("RobloxPromptGui")
             if promptUI then
                 local overlay = promptUI:FindFirstChild("promptOverlay")
                 if overlay and overlay:FindFirstChild("ErrorPrompt") and overlay.ErrorPrompt.Visible then
-                    setCooldown(15, "Server Full! Cooldown 15s...")
+                    
+                    if lastAttemptedServer then badServers[lastAttemptedServer] = true end
+                    
+                    -- Force close the GUI so we don't get stuck in a loop
+                    pcall(function() GuiService:ClearError() end)
+                    overlay.ErrorPrompt.Visible = false 
+                    
+                    setCooldown(10, "Prompt Killed! Blacklisted.")
                 end
             end
         end)
@@ -179,7 +194,6 @@ task.spawn(function()
     while true do
         task.wait(2) 
         
-        -- Respect global cooldowns strictly
         if os.time() < globalCooldown then
             StatusLabel.Text = "Cooldown: " .. (globalCooldown - os.time()) .. "s"
             StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
