@@ -58,7 +58,7 @@ local isHopping = false
 local globalCooldown = 0 
 local badServers = {} 
 local lastAttemptedServer = nil
-local savedCursor = "" -- The Smart Memory Cursor
+local savedCursor = "" 
 
 badServers[game.JobId] = true -- Immediately blacklist our current server
 
@@ -70,7 +70,7 @@ local function setCooldown(seconds, message)
 end
 
 -------------------------------------------------------------------------------
--- 3. SMART-SCROLL HOPPING LOGIC
+-- 3. THE HYBRID HOPPING LOGIC (WITH BLIND FALLBACK)
 -------------------------------------------------------------------------------
 local function serverHop()
     if isHopping then return end
@@ -82,7 +82,6 @@ local function serverHop()
         local availableServers = {}
         local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Desc&limit=100"
         
-        -- Use our saved cursor to seamlessly pick up where we left off
         if savedCursor and savedCursor ~= "" then
             serversApi = serversApi .. "&cursor=" .. savedCursor
         else
@@ -99,23 +98,30 @@ local function serverHop()
             end
         end)
         
-        if success and type(result) == "table" and result.data then
-            -- Save the cursor so the NEXT hop checks the NEXT page!
+        -- THE FIX: If we hit a Rate Limit, trigger the Emergency Blind Hop
+        if result == "RATELIMIT" or not success then
+            StatusLabel.Text = "API Blocked! Forcing Blind Hop..."
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            task.wait(2)
+            
+            pcall(function() TeleportService:TeleportCancel() end)
+            TeleportService:Teleport(PlaceId, LocalPlayer)
+            
+            task.wait(20)
+            if isHopping then
+                setCooldown(10, "Blind Hop stalled! Retrying...")
+            end
+            return
+        end
+        
+        if type(result) == "table" and result.data then
             savedCursor = result.nextPageCursor or "" 
             
             for _, server in ipairs(result.data) do
-                -- Ghost filter: at least 1 player, not full, not blacklisted
                 if server.playing and server.playing >= 1 and server.playing < (server.maxPlayers - 2) and not badServers[server.id] then
                     table.insert(availableServers, server)
                 end
             end
-        elseif result == "RATELIMIT" then
-            setCooldown(20, "Rate Limit! Waiting 20s...")
-            return
-        else
-            savedCursor = "" -- Reset search on total API failure
-            setCooldown(10, "API Failed! Retrying...")
-            return
         end
         
         if #availableServers > 0 then
@@ -136,7 +142,6 @@ local function serverHop()
                 setCooldown(10, "Teleport stalled! Blacklisting...")
             end
         else
-            -- If this page was full of bad servers, cooldown slightly and try the next page
             setCooldown(5, "Page empty! Next page...")
         end
     end)
