@@ -58,6 +58,7 @@ local isHopping = false
 local globalCooldown = 0 
 local badServers = {} 
 local lastAttemptedServer = nil
+local savedCursor = "" -- The Smart Memory Cursor
 
 badServers[game.JobId] = true -- Immediately blacklist our current server
 
@@ -69,59 +70,51 @@ local function setCooldown(seconds, message)
 end
 
 -------------------------------------------------------------------------------
--- 3. DEEP-SEARCH HOPPING LOGIC
+-- 3. SMART-SCROLL HOPPING LOGIC
 -------------------------------------------------------------------------------
 local function serverHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Deep Searching Servers..."
+    StatusLabel.Text = "Searching Page..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
         local availableServers = {}
-        local cursor = ""
-        local rateLimited = false
+        local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Desc&limit=100"
         
-        -- The Deep Search Engine: Scrape up to 5 pages (500 servers) to find a guaranteed good one
-        for i = 1, 5 do
-            local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Desc&limit=100"
-            
-            if cursor ~= "" then
-                serversApi = serversApi .. "&cursor=" .. cursor
-            else
-                serversApi = serversApi .. "&_b=" .. tostring(os.time()) -- Cache buster on first page
-            end
-            
-            local success, result = pcall(function() 
-                if fetchReq then
-                    local response = fetchReq({Url = serversApi, Method = "GET"})
-                    if response.StatusCode == 429 then return "RATELIMIT" end
-                    return HttpService:JSONDecode(response.Body)
-                else
-                    return HttpService:JSONDecode(game:HttpGet(serversApi)) 
-                end
-            end)
-            
-            if success and type(result) == "table" and result.data then
-                for _, server in ipairs(result.data) do
-                    -- GHOST FILTER: Must have >= 2 players, must not be full, must not be blacklisted
-                    if server.playing and server.playing >= 2 and server.playing < (server.maxPlayers - 2) and not badServers[server.id] then
-                        table.insert(availableServers, server)
-                    end
-                end
-                
-                cursor = result.nextPageCursor
-                if #availableServers >= 10 or not cursor then
-                    break -- We found plenty of good servers, stop searching
-                end
-            elseif result == "RATELIMIT" then
-                rateLimited = true
-                break
-            end
+        -- Use our saved cursor to seamlessly pick up where we left off
+        if savedCursor and savedCursor ~= "" then
+            serversApi = serversApi .. "&cursor=" .. savedCursor
+        else
+            serversApi = serversApi .. "&_b=" .. tostring(os.time())
         end
         
-        if rateLimited and #availableServers == 0 then
+        local success, result = pcall(function() 
+            if fetchReq then
+                local response = fetchReq({Url = serversApi, Method = "GET"})
+                if response.StatusCode == 429 then return "RATELIMIT" end
+                return HttpService:JSONDecode(response.Body)
+            else
+                return HttpService:JSONDecode(game:HttpGet(serversApi)) 
+            end
+        end)
+        
+        if success and type(result) == "table" and result.data then
+            -- Save the cursor so the NEXT hop checks the NEXT page!
+            savedCursor = result.nextPageCursor or "" 
+            
+            for _, server in ipairs(result.data) do
+                -- Ghost filter: at least 1 player, not full, not blacklisted
+                if server.playing and server.playing >= 1 and server.playing < (server.maxPlayers - 2) and not badServers[server.id] then
+                    table.insert(availableServers, server)
+                end
+            end
+        elseif result == "RATELIMIT" then
             setCooldown(20, "Rate Limit! Waiting 20s...")
+            return
+        else
+            savedCursor = "" -- Reset search on total API failure
+            setCooldown(10, "API Failed! Retrying...")
             return
         end
         
@@ -143,7 +136,8 @@ local function serverHop()
                 setCooldown(10, "Teleport stalled! Blacklisting...")
             end
         else
-            setCooldown(15, "All 500 servers bad! Waiting...")
+            -- If this page was full of bad servers, cooldown slightly and try the next page
+            setCooldown(5, "Page empty! Next page...")
         end
     end)
 end
