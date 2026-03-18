@@ -7,6 +7,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local GuiService = game:GetService("GuiService")
+local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -19,7 +20,7 @@ pcall(function() fetchReq = request or http_request or (http and http.request) o
 -- 1. DRAGGABLE STATUS UI
 -------------------------------------------------------------------------------
 pcall(function()
-    local hiddenGui = gethui and gethui() or game:GetService("CoreGui")
+    local hiddenGui = gethui and gethui() or CoreGui
     for _, v in pairs(hiddenGui:GetChildren()) do if v.Name == "VicDetectorUI" then v:Destroy() end end
     for _, v in pairs(LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do if v.Name == "VicDetectorUI" then v:Destroy() end end
 end)
@@ -51,7 +52,7 @@ StatusLabel.TextSize = 14
 StatusLabel.TextWrapped = true
 
 -------------------------------------------------------------------------------
--- 2. ROBUST HOPPING LOGIC
+-- 2. ROBUST HOPPING LOGIC (WITH FAILSAFE)
 -------------------------------------------------------------------------------
 local isHopping = false
 
@@ -73,10 +74,13 @@ local function serverHop()
             end
         end)
         
+        local hoppedViaApi = false
+        
         if success and result and result.data then
             local availableServers = {}
             for _, server in ipairs(result.data) do
-                if server.playing and server.playing < (server.maxPlayers - 1) and server.id ~= game.JobId then
+                -- Extra strict check: ensure at least 2 slots are open
+                if server.playing and server.playing < (server.maxPlayers - 2) and server.id ~= game.JobId then
                     table.insert(availableServers, server)
                 end
             end
@@ -87,22 +91,67 @@ local function serverHop()
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
                 task.wait(1)
                 TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
-                return 
+                hoppedViaApi = true
             end
         end
         
-        StatusLabel.Text = "API Failed. Random Hop..."
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-        task.wait(1)
-        TeleportService:Teleport(PlaceId, LocalPlayer)
+        if not hoppedViaApi then
+            StatusLabel.Text = "API Failed. Random Hop..."
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            task.wait(1)
+            TeleportService:Teleport(PlaceId, LocalPlayer)
+        end
         
-        task.wait(15)
-        isHopping = false
+        -- THE FIX: If 20 seconds pass and we are still here, the teleport failed! Unlock and retry.
+        task.wait(20)
+        if isHopping then
+            StatusLabel.Text = "Teleport stalled. Retrying..."
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            isHopping = false
+        end
     end)
 end
 
 -------------------------------------------------------------------------------
--- 3. VICIOUS BEE DETECTOR
+-- 3. BULLETPROOF ERROR & KICK CATCHERS
+-------------------------------------------------------------------------------
+-- Catcher 1: Built-in Teleport Failure Event
+TeleportService.TeleportInitFailed:Connect(function()
+    StatusLabel.Text = "Teleport Blocked! Retrying..."
+    task.wait(2)
+    isHopping = false
+    serverHop()
+end)
+
+-- Catcher 2: GuiService Error Event
+GuiService.ErrorMessageChanged:Connect(function()
+    StatusLabel.Text = "Error detected! Forcing hop..."
+    task.wait(2)
+    isHopping = false
+    serverHop()
+end)
+
+-- Catcher 3: Physical Screen Prompt Scanner (Fixes "Server Full" getting stuck)
+task.spawn(function()
+    while task.wait(3) do
+        pcall(function()
+            local promptUI = CoreGui:FindFirstChild("RobloxPromptGui")
+            if promptUI then
+                local overlay = promptUI:FindFirstChild("promptOverlay")
+                if overlay and overlay:FindFirstChild("ErrorPrompt") and overlay.ErrorPrompt.Visible then
+                    StatusLabel.Text = "Server Full / Kick Detected!"
+                    StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+                    task.wait(2)
+                    isHopping = false
+                    serverHop()
+                end
+            end
+        end)
+    end
+end)
+
+-------------------------------------------------------------------------------
+-- 4. VICIOUS BEE DETECTOR
 -------------------------------------------------------------------------------
 local function isViciousAlive()
     local targetFolders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
@@ -117,17 +166,6 @@ local function isViciousAlive()
     end
     return false
 end
-
--------------------------------------------------------------------------------
--- 4. ANTI-STUCK (DISCONNECT CATCHER)
--------------------------------------------------------------------------------
-GuiService.ErrorMessageChanged:Connect(function()
-    StatusLabel.Text = "Error detected! Forcing hop..."
-    StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-    task.wait(3)
-    isHopping = false
-    serverHop()
-end)
 
 -------------------------------------------------------------------------------
 -- 5. MAIN LOOP & ATLAS INJECTOR
@@ -161,7 +199,7 @@ task.spawn(function()
         else
             StatusLabel.Text = "Verifying empty server..."
             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80) -- Orange
-            task.wait(5) -- Give it 5 seconds to double check (prevents hopping during lag spikes)
+            task.wait(5) -- Give it 5 seconds to double check
             
             if not isViciousAlive() then
                 serverHop()
