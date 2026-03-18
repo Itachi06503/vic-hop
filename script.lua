@@ -1,6 +1,6 @@
 -- Wait for the game to fully load
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(15) -- Give Roblox extra time to register you in the server before allowing a hop
+task.wait(15) -- Give Roblox extra time to register you
 
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
@@ -52,10 +52,21 @@ StatusLabel.TextSize = 14
 StatusLabel.TextWrapped = true
 
 -------------------------------------------------------------------------------
--- 2. BULLETPROOF HOPPING LOGIC
+-- 2. GLOBAL COOLDOWN & STATE
 -------------------------------------------------------------------------------
 local isHopping = false
+local globalCooldown = 0 -- Uses os.time() to enforce strict waiting
 
+local function setCooldown(seconds, message)
+    globalCooldown = os.time() + seconds
+    isHopping = false
+    StatusLabel.Text = message
+    StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+end
+
+-------------------------------------------------------------------------------
+-- 3. BULLETPROOF HOPPING LOGIC
+-------------------------------------------------------------------------------
 local function serverHop()
     if isHopping then return end
     isHopping = true
@@ -64,89 +75,68 @@ local function serverHop()
     
     task.spawn(function()
         local chosenServer = nil
-        local attempts = 0
         
-        while not chosenServer and attempts < 3 do
-            attempts = attempts + 1
-            -- Randomize Asc/Desc to bypass cache and find different servers
-            local sortOrder = (math.random(1, 2) == 1) and "Asc" or "Desc"
-            local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100"
-            
-            local success, result = pcall(function() 
-                if fetchReq then
-                    local response = fetchReq({Url = serversApi, Method = "GET"})
-                    -- Detect rate limit strictly
-                    if response.StatusCode == 429 then return "RATELIMIT" end
-                    return HttpService:JSONDecode(response.Body)
-                else
-                    return HttpService:JSONDecode(game:HttpGet(serversApi)) 
-                end
-            end)
-            
-            if success and type(result) == "table" and result.data then
-                local availableServers = {}
-                for _, server in ipairs(result.data) do
-                    -- Must have 2 slots open and NOT be the current server
-                    if server.playing and server.playing < (server.maxPlayers - 2) and server.id ~= game.JobId then
-                        table.insert(availableServers, server)
-                    end
-                end
-                
-                if #availableServers > 0 then
-                    chosenServer = availableServers[math.random(1, #availableServers)]
-                    break
-                end
-            elseif result == "RATELIMIT" then
-                StatusLabel.Text = "Rate Limit! Waiting 15s..."
-                StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                task.wait(15) -- MUST be 15s to clear the Roblox API block
+        -- Cache Buster: Generates a random string to trick the executor into fetching fresh data
+        local cacheBuster = tostring(math.random(100000, 999999)) .. tostring(os.time())
+        local sortOrder = (math.random(1, 2) == 1) and "Asc" or "Desc"
+        local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100&_buster=" .. cacheBuster
+        
+        local success, result = pcall(function() 
+            if fetchReq then
+                local response = fetchReq({Url = serversApi, Method = "GET"})
+                if response.StatusCode == 429 then return "RATELIMIT" end
+                return HttpService:JSONDecode(response.Body)
             else
-                StatusLabel.Text = "API Failed. Retry " .. attempts .. "/3..."
-                task.wait(5)
+                return HttpService:JSONDecode(game:HttpGet(serversApi)) 
             end
-        end
+        end)
         
-        -- Only hop if we have a guaranteed new server ID. No more random fallbacks.
-        if chosenServer then
-            StatusLabel.Text = "Teleporting..."
-            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-            task.wait(1)
-            TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
-        else
-            StatusLabel.Text = "Hop Failed! Waiting 15s..."
-            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-            task.wait(15)
-            isHopping = false -- Release the lock so it tries a fresh search
+        if success and type(result) == "table" and result.data then
+            local availableServers = {}
+            for _, server in ipairs(result.data) do
+                if server.playing and server.playing < (server.maxPlayers - 2) and server.id ~= game.JobId then
+                    table.insert(availableServers, server)
+                end
+            end
+            
+            if #availableServers > 0 then
+                chosenServer = availableServers[math.random(1, #availableServers)]
+            end
+        elseif result == "RATELIMIT" then
+            setCooldown(20, "Rate Limit! Waiting 20s...")
             return
         end
         
-        -- Failsafe: If 20 seconds pass and we haven't left, retry.
-        task.wait(20)
-        if isHopping then
-            StatusLabel.Text = "Teleport stalled. Retrying..."
-            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-            isHopping = false
+        if chosenServer then
+            StatusLabel.Text = "Teleporting..."
+            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+            
+            -- Clear any hanging teleport states before attempting
+            pcall(function() TeleportService:TeleportCancel() end)
+            task.wait(1)
+            
+            TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
+            
+            -- Timeout failsafe
+            task.wait(20)
+            if isHopping then
+                setCooldown(10, "Teleport stalled! Retrying...")
+            end
+        else
+            setCooldown(15, "API Empty! Waiting 15s...")
         end
     end)
 end
 
 -------------------------------------------------------------------------------
--- 3. ERROR & KICK CATCHERS
+-- 4. CLEAN ERROR CATCHERS (NO LOOPS)
 -------------------------------------------------------------------------------
 TeleportService.TeleportInitFailed:Connect(function()
-    StatusLabel.Text = "Teleport Blocked! Waiting 10s..."
-    StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-    task.wait(10)
-    isHopping = false
-    serverHop()
+    setCooldown(15, "Teleport Blocked! Cooldown 15s...")
 end)
 
 GuiService.ErrorMessageChanged:Connect(function()
-    StatusLabel.Text = "Error detected! Waiting 10s..."
-    StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-    task.wait(10)
-    isHopping = false
-    serverHop()
+    setCooldown(15, "Error Prompt! Cooldown 15s...")
 end)
 
 task.spawn(function()
@@ -156,11 +146,7 @@ task.spawn(function()
             if promptUI then
                 local overlay = promptUI:FindFirstChild("promptOverlay")
                 if overlay and overlay:FindFirstChild("ErrorPrompt") and overlay.ErrorPrompt.Visible then
-                    StatusLabel.Text = "Server Full! Waiting 10s..."
-                    StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                    task.wait(10)
-                    isHopping = false
-                    serverHop()
+                    setCooldown(15, "Server Full! Cooldown 15s...")
                 end
             end
         end)
@@ -168,7 +154,7 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 4. VICIOUS BEE DETECTOR
+-- 5. VICIOUS BEE DETECTOR
 -------------------------------------------------------------------------------
 local function isViciousAlive()
     local targetFolders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
@@ -185,13 +171,21 @@ local function isViciousAlive()
 end
 
 -------------------------------------------------------------------------------
--- 5. MAIN LOOP & ATLAS INJECTOR
+-- 6. MAIN LOOP & ATLAS INJECTOR
 -------------------------------------------------------------------------------
 local atlasLoaded = false
 
 task.spawn(function()
     while true do
-        task.wait(3) 
+        task.wait(2) 
+        
+        -- Respect global cooldowns strictly
+        if os.time() < globalCooldown then
+            StatusLabel.Text = "Cooldown: " .. (globalCooldown - os.time()) .. "s"
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            continue
+        end
+        
         if isHopping then continue end
         
         if isViciousAlive() then
@@ -213,7 +207,7 @@ task.spawn(function()
             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
             task.wait(5) 
             
-            if not isViciousAlive() then
+            if not isViciousAlive() and not isHopping and os.time() >= globalCooldown then
                 serverHop()
             end
         end
