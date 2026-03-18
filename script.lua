@@ -56,7 +56,7 @@ StatusLabel.TextWrapped = true
 -------------------------------------------------------------------------------
 local isHopping = false
 local globalCooldown = 0 
-local badServers = {} -- This memory bank tracks broken servers
+local badServers = {} 
 local lastAttemptedServer = nil
 
 badServers[game.JobId] = true -- Immediately blacklist our current server
@@ -69,50 +69,66 @@ local function setCooldown(seconds, message)
 end
 
 -------------------------------------------------------------------------------
--- 3. BULLETPROOF HOPPING LOGIC
+-- 3. DEEP-SEARCH HOPPING LOGIC
 -------------------------------------------------------------------------------
 local function serverHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "No Vicious! Searching..."
+    StatusLabel.Text = "Deep Searching Servers..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
-        local chosenServer = nil
+        local availableServers = {}
+        local cursor = ""
+        local rateLimited = false
         
-        local cacheBuster = tostring(math.random(100000, 999999)) .. tostring(os.time())
-        local sortOrder = (math.random(1, 2) == 1) and "Asc" or "Desc"
-        local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100&_buster=" .. cacheBuster
-        
-        local success, result = pcall(function() 
-            if fetchReq then
-                local response = fetchReq({Url = serversApi, Method = "GET"})
-                if response.StatusCode == 429 then return "RATELIMIT" end
-                return HttpService:JSONDecode(response.Body)
+        -- The Deep Search Engine: Scrape up to 5 pages (500 servers) to find a guaranteed good one
+        for i = 1, 5 do
+            local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Desc&limit=100"
+            
+            if cursor ~= "" then
+                serversApi = serversApi .. "&cursor=" .. cursor
             else
-                return HttpService:JSONDecode(game:HttpGet(serversApi)) 
-            end
-        end)
-        
-        if success and type(result) == "table" and result.data then
-            local availableServers = {}
-            for _, server in ipairs(result.data) do
-                -- Skip full servers AND skip any server on our Blacklist
-                if server.playing and server.playing < (server.maxPlayers - 2) and not badServers[server.id] then
-                    table.insert(availableServers, server)
-                end
+                serversApi = serversApi .. "&_b=" .. tostring(os.time()) -- Cache buster on first page
             end
             
-            if #availableServers > 0 then
-                chosenServer = availableServers[math.random(1, #availableServers)]
+            local success, result = pcall(function() 
+                if fetchReq then
+                    local response = fetchReq({Url = serversApi, Method = "GET"})
+                    if response.StatusCode == 429 then return "RATELIMIT" end
+                    return HttpService:JSONDecode(response.Body)
+                else
+                    return HttpService:JSONDecode(game:HttpGet(serversApi)) 
+                end
+            end)
+            
+            if success and type(result) == "table" and result.data then
+                for _, server in ipairs(result.data) do
+                    -- GHOST FILTER: Must have >= 2 players, must not be full, must not be blacklisted
+                    if server.playing and server.playing >= 2 and server.playing < (server.maxPlayers - 2) and not badServers[server.id] then
+                        table.insert(availableServers, server)
+                    end
+                end
+                
+                cursor = result.nextPageCursor
+                if #availableServers >= 10 or not cursor then
+                    break -- We found plenty of good servers, stop searching
+                end
+            elseif result == "RATELIMIT" then
+                rateLimited = true
+                break
             end
-        elseif result == "RATELIMIT" then
+        end
+        
+        if rateLimited and #availableServers == 0 then
             setCooldown(20, "Rate Limit! Waiting 20s...")
             return
         end
         
-        if chosenServer then
-            lastAttemptedServer = chosenServer.id -- Save ID in case it fails
+        if #availableServers > 0 then
+            local chosenServer = availableServers[math.random(1, #availableServers)]
+            lastAttemptedServer = chosenServer.id
+            
             StatusLabel.Text = "Teleporting..."
             StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
             
@@ -123,18 +139,17 @@ local function serverHop()
             
             task.wait(20)
             if isHopping then
-                -- If we are still here after 20s, the server was bad. Blacklist it.
                 badServers[lastAttemptedServer] = true
                 setCooldown(10, "Teleport stalled! Blacklisting...")
             end
         else
-            setCooldown(15, "API Empty! Waiting 15s...")
+            setCooldown(15, "All 500 servers bad! Waiting...")
         end
     end)
 end
 
 -------------------------------------------------------------------------------
--- 4. CLEAN ERROR CATCHERS (WITH AUTO-CLOSER & BLACKLISTER)
+-- 4. CLEAN ERROR CATCHERS
 -------------------------------------------------------------------------------
 TeleportService.TeleportInitFailed:Connect(function()
     if lastAttemptedServer then badServers[lastAttemptedServer] = true end
@@ -143,7 +158,7 @@ end)
 
 GuiService.ErrorMessageChanged:Connect(function()
     if lastAttemptedServer then badServers[lastAttemptedServer] = true end
-    pcall(function() GuiService:ClearError() end) -- Closes the error automatically
+    pcall(function() GuiService:ClearError() end) 
     setCooldown(10, "Error Cleared! Blacklisted.")
 end)
 
@@ -154,13 +169,9 @@ task.spawn(function()
             if promptUI then
                 local overlay = promptUI:FindFirstChild("promptOverlay")
                 if overlay and overlay:FindFirstChild("ErrorPrompt") and overlay.ErrorPrompt.Visible then
-                    
                     if lastAttemptedServer then badServers[lastAttemptedServer] = true end
-                    
-                    -- Force close the GUI so we don't get stuck in a loop
                     pcall(function() GuiService:ClearError() end)
                     overlay.ErrorPrompt.Visible = false 
-                    
                     setCooldown(10, "Prompt Killed! Blacklisted.")
                 end
             end
