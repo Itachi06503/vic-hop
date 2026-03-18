@@ -52,7 +52,7 @@ StatusLabel.TextSize = 14
 StatusLabel.TextWrapped = true
 
 -------------------------------------------------------------------------------
--- 2. ROBUST HOPPING LOGIC (WITH FAILSAFE)
+-- 2. ROBUST HOPPING LOGIC (WITH RETRIES)
 -------------------------------------------------------------------------------
 local isHopping = false
 
@@ -63,46 +63,58 @@ local function serverHop()
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
-        local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100"
+        local chosenServer = nil
+        local attempts = 0
         
-        local success, result = pcall(function() 
-            if fetchReq then
-                local response = fetchReq({Url = serversApi, Method = "GET"})
-                return HttpService:JSONDecode(response.Body)
-            else
-                return HttpService:JSONDecode(game:HttpGet(serversApi)) 
-            end
-        end)
-        
-        local hoppedViaApi = false
-        
-        if success and result and result.data then
-            local availableServers = {}
-            for _, server in ipairs(result.data) do
-                -- Extra strict check: ensure at least 2 slots are open
-                if server.playing and server.playing < (server.maxPlayers - 2) and server.id ~= game.JobId then
-                    table.insert(availableServers, server)
+        -- Try to fetch the API up to 3 times to bypass rate-limits
+        while not chosenServer and attempts < 3 do
+            attempts = attempts + 1
+            local serversApi = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100"
+            
+            local success, result = pcall(function() 
+                if fetchReq then
+                    local response = fetchReq({Url = serversApi, Method = "GET"})
+                    return HttpService:JSONDecode(response.Body)
+                else
+                    return HttpService:JSONDecode(game:HttpGet(serversApi)) 
+                end
+            end)
+            
+            if success and result and result.data then
+                local availableServers = {}
+                for _, server in ipairs(result.data) do
+                    if server.playing and server.playing < (server.maxPlayers - 2) and server.id ~= game.JobId then
+                        table.insert(availableServers, server)
+                    end
+                end
+                
+                if #availableServers > 0 then
+                    chosenServer = availableServers[math.random(1, #availableServers)]
+                    break
                 end
             end
             
-            if #availableServers > 0 then
-                local chosenServer = availableServers[math.random(1, #availableServers)]
-                StatusLabel.Text = "Teleporting..."
-                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-                task.wait(1)
-                TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
-                hoppedViaApi = true
+            if not chosenServer then
+                StatusLabel.Text = "API Rate Limit. Retry " .. attempts .. "/3..."
+                StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
+                task.wait(3) -- Wait 3 seconds before trying the API again
             end
         end
         
-        if not hoppedViaApi then
+        -- If we successfully found a server, teleport. Otherwise, fallback.
+        if chosenServer then
+            StatusLabel.Text = "Teleporting..."
+            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+            task.wait(1)
+            TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
+        else
             StatusLabel.Text = "API Failed. Random Hop..."
             StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-            task.wait(1)
+            task.wait(2)
             TeleportService:Teleport(PlaceId, LocalPlayer)
         end
         
-        -- THE FIX: If 20 seconds pass and we are still here, the teleport failed! Unlock and retry.
+        -- If 20 seconds pass and we are still here, the teleport failed! Unlock and retry.
         task.wait(20)
         if isHopping then
             StatusLabel.Text = "Teleport stalled. Retrying..."
@@ -113,25 +125,27 @@ local function serverHop()
 end
 
 -------------------------------------------------------------------------------
--- 3. BULLETPROOF ERROR & KICK CATCHERS
+-- 3. BULLETPROOF ERROR & KICK CATCHERS (WITH COOLDOWNS)
 -------------------------------------------------------------------------------
 -- Catcher 1: Built-in Teleport Failure Event
 TeleportService.TeleportInitFailed:Connect(function()
-    StatusLabel.Text = "Teleport Blocked! Retrying..."
-    task.wait(2)
+    StatusLabel.Text = "Teleport Blocked! Waiting 5s..."
+    StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+    task.wait(5) -- MUST wait 5 seconds to bypass Roblox spam filter
     isHopping = false
     serverHop()
 end)
 
 -- Catcher 2: GuiService Error Event
 GuiService.ErrorMessageChanged:Connect(function()
-    StatusLabel.Text = "Error detected! Forcing hop..."
-    task.wait(2)
+    StatusLabel.Text = "Error detected! Waiting 5s..."
+    StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+    task.wait(5) -- MUST wait 5 seconds to clear the error state
     isHopping = false
     serverHop()
 end)
 
--- Catcher 3: Physical Screen Prompt Scanner (Fixes "Server Full" getting stuck)
+-- Catcher 3: Physical Screen Prompt Scanner
 task.spawn(function()
     while task.wait(3) do
         pcall(function()
@@ -139,9 +153,9 @@ task.spawn(function()
             if promptUI then
                 local overlay = promptUI:FindFirstChild("promptOverlay")
                 if overlay and overlay:FindFirstChild("ErrorPrompt") and overlay.ErrorPrompt.Visible then
-                    StatusLabel.Text = "Server Full / Kick Detected!"
+                    StatusLabel.Text = "Server Full Detected! Waiting 5s..."
                     StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                    task.wait(2)
+                    task.wait(5)
                     isHopping = false
                     serverHop()
                 end
@@ -181,7 +195,7 @@ task.spawn(function()
             if not atlasLoaded then
                 StatusLabel.Text = "Vicious Found! Loading Atlas..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80) -- Green
-                atlasLoaded = true -- Set the lock so it only loads Atlas once
+                atlasLoaded = true 
                 
                 -- ========================================================
                 -- ATLAS HUB INJECTOR
