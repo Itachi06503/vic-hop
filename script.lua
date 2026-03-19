@@ -55,67 +55,89 @@ local hopCountdown = 15
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. THE "AGED SERVER" HOPPER (WITH 1-PLAYER FALLBACK)
+-- 3. DEEP SCAN HOPPER (SEARCHES MULTIPLE PAGES FOR 2s/3s)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Hunting aged server..."
+    StatusLabel.Text = "Deep scanning servers..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
-        local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100&_=" .. tostring(math.random(10000, 99999))
+        local cursor = ""
+        local targetId = nil
+        local foundPlayers = 0
+        local fallbackId = nil
         
-        local success, result = pcall(function()
-            return HttpService:JSONDecode(game:HttpGet(url))
-        end)
-
-        if success and result and result.data then
-            local minPlayers = math.huge
-            local smallestServers = {}
-            local hasOnePlayerServers = false
-
-            -- Pass 1: Find the lowest player count (2 or more). Note if 1s exist.
-            for _, srv in pairs(result.data) do
-                if srv.playing and srv.id ~= game.JobId then
-                    if srv.playing >= 2 then
-                        if srv.playing < minPlayers then
-                            minPlayers = srv.playing
-                        end
-                    elseif srv.playing == 1 then
-                        hasOnePlayerServers = true
-                    end
-                end
+        -- Scan up to 10 pages (1,000 servers) to dig past the wall of 1-player servers
+        for i = 1, 10 do
+            local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100"
+            if cursor ~= "" then
+                url = url .. "&cursor=" .. cursor
             end
-
-            -- Failsafe: If no servers have 2+ players, but 1-player servers exist, drop our standards to 1
-            if minPlayers == math.huge and hasOnePlayerServers then
-                minPlayers = 1
-            end
-
-            -- Pass 2: Collect all the servers that share our target player count
-            if minPlayers ~= math.huge then
-                for _, srv in pairs(result.data) do
-                    if srv.playing == minPlayers and srv.id ~= game.JobId then
-                        table.insert(smallestServers, srv.id)
-                    end
-                end
-            end
+            url = url .. "&_=" .. tostring(math.random(10000, 99999))
             
-            -- Pick a random one from the valid pool
-            if #smallestServers > 0 then
-                local targetId = smallestServers[math.random(1, #smallestServers)]
-                StatusLabel.Text = "Found " .. tostring(minPlayers) .. " player server!"
-                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+            local success, result = pcall(function()
+                return HttpService:JSONDecode(game:HttpGet(url))
+            end)
+            
+            if success and result and result.data then
+                local validServers = {}
                 
-                TeleportService:TeleportToPlaceInstance(PlaceId, targetId, LocalPlayer)
+                for _, srv in pairs(result.data) do
+                    if srv.id ~= game.JobId then
+                        -- Save a 1-player server just in case we NEVER find a 2
+                        if srv.playing == 1 and not fallbackId then
+                            fallbackId = srv.id 
+                        -- If it's 2 or more, add it to our valid list!
+                        elseif srv.playing >= 2 then
+                            table.insert(validServers, srv)
+                        end
+                    end
+                end
+                
+                -- Did we find any 2+ servers on this page?
+                if #validServers > 0 then
+                    local minP = math.huge
+                    local bestServers = {}
+                    
+                    -- Find the lowest number (2, 3, etc.)
+                    for _, srv in pairs(validServers) do
+                        if srv.playing < minP then minP = srv.playing end
+                    end
+                    
+                    -- Group them up
+                    for _, srv in pairs(validServers) do
+                        if srv.playing == minP then table.insert(bestServers, srv.id) end
+                    end
+                    
+                    targetId = bestServers[math.random(1, #bestServers)]
+                    foundPlayers = minP
+                    break -- We found what we wanted, stop scanning pages!
+                else
+                    -- No 2+ servers here. Get the cursor for the next page and loop again.
+                    if result.nextPageCursor then
+                        cursor = result.nextPageCursor
+                    else
+                        break -- We hit the end of the server list
+                    end
+                end
             else
-                StatusLabel.Text = "No good servers. Retrying..."
-                task.wait(5)
-                isHopping = false 
+                break -- HTTP error, exit loop
             end
+        end
+        
+        -- Choose our target (The 2/3 server if we found one, or the 1 server as a fallback)
+        local finalId = targetId or fallbackId
+        
+        if finalId then
+            local pCountText = targetId and tostring(foundPlayers) or "1 (Fallback)"
+            StatusLabel.Text = "Teleporting (" .. pCountText .. " players)..."
+            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+            
+            TeleportService:TeleportToPlaceInstance(PlaceId, finalId, LocalPlayer)
         else
-            StatusLabel.Text = "HTTP Failed. Retrying..."
+            StatusLabel.Text = "Scan failed. Retrying..."
             task.wait(5)
             isHopping = false 
         end
@@ -183,18 +205,15 @@ task.spawn(function()
                     loadstring(game:HttpGet("https://raw.githubusercontent.com/Chris12089/atlasbss/main/script.lua"))()
                 end)
             else
-                -- Atlas is loaded, we are fighting it.
                 StatusLabel.Text = "Killing Vicious..."
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
             end
         else
             -- Vicious is NOT here. 
             if atlasExecuted then
-                -- Vicious just died!
                 StatusLabel.Text = "Vicious Dead! Collecting Loot..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
-                -- Wait 5 seconds to grab stingers
                 task.wait(5)
                 performHop()
             else
