@@ -55,18 +55,19 @@ local hopCountdown = 30
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. THE STRICT HOPPER FUNCTION
+-- 3. THE PROXY HOPPER FUNCTION (RATE LIMIT BYPASS)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Fetching empty server..."
+    StatusLabel.Text = "Fetching Proxy Server..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
-        -- Randomize Asc/Desc so we don't always pull the exact same top 100 list
         local sortOrder = (math.random() > 0.5) and "Asc" or "Desc"
-        local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100"
+        
+        -- THE FIX: Using RoProxy instead of Roblox directly to bypass IP rate limits
+        local url = "https://games.roproxy.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100"
         
         local success, result = pcall(function()
             return HttpService:JSONDecode(game:HttpGet(url))
@@ -75,7 +76,7 @@ local function performHop()
         if success and result and result.data then
             local validServers = {}
             for _, srv in pairs(result.data) do
-                -- STRICT FILTER: At least 2 players (no ghost servers), and at least 3 EMPTY SLOTS
+                -- Strict filter: Leave at least 3 slots empty so friends don't trigger a redirect
                 if srv.playing and srv.playing >= 2 and srv.playing <= (srv.maxPlayers - 3) and srv.id ~= game.JobId then
                     table.insert(validServers, srv.id)
                 end
@@ -90,12 +91,12 @@ local function performHop()
             else
                 StatusLabel.Text = "No good servers. Retrying..."
                 task.wait(5)
-                isHopping = false -- Reset so it tries again
+                isHopping = false 
             end
         else
-            StatusLabel.Text = "HTTP Failed. Retrying..."
+            StatusLabel.Text = "Proxy Failed. Retrying..."
             task.wait(5)
-            isHopping = false -- Reset so it tries again
+            isHopping = false 
         end
     end)
 end
@@ -110,10 +111,8 @@ task.spawn(function()
             if prompt and prompt:FindFirstChild("promptOverlay") then
                 local errorPrompt = prompt.promptOverlay:FindFirstChild("ErrorPrompt")
                 if errorPrompt and errorPrompt.Visible then
-                    -- 1. Click away the error
                     GuiService:ClearError() 
                     
-                    -- 2. Override timeline, force 10s hop, completely reset the hopper state
                     StatusLabel.Text = "Error cleared! Hopping in 10s..."
                     StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
                     
