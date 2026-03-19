@@ -54,19 +54,21 @@ local isHopping = false
 local hopCountdown = 15 
 local forceHopTimer = false 
 
-local blacklistedServers = {} -- Stores broken server IDs
-local currentTargetId = nil   -- The server we are currently trying to join
+local blacklistedServers = {} 
+local currentTargetId = nil   
+local failedAttempts = 0 -- Tracks how many times we've been stuck in the loop
 
 -------------------------------------------------------------------------------
--- 3. SAFER TELEPORT LOGIC + BLACKLISTING
+-- 3. SAFER TELEPORT LOGIC + LOOP BREAKER
 -------------------------------------------------------------------------------
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
     if player == LocalPlayer then
         if currentTargetId then
-            blacklistedServers[currentTargetId] = true -- Add broken server to blacklist
+            blacklistedServers[currentTargetId] = true 
         end
+        failedAttempts = failedAttempts + 1
         isHopping = false
-        StatusLabel.Text = "Roblox TP Fail! Blacklisted & Retrying..."
+        StatusLabel.Text = "Roblox TP Fail! Blacklisted..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
     end
 end)
@@ -82,6 +84,7 @@ local function executeTeleport(targetId, pCountLabel)
     
     if not success then
         blacklistedServers[targetId] = true
+        failedAttempts = failedAttempts + 1
         StatusLabel.Text = "TP Error! Blacklisting..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         task.wait(3)
@@ -89,24 +92,33 @@ local function executeTeleport(targetId, pCountLabel)
         return
     end
     
-    -- Timeout Watchdog
     task.spawn(function()
         task.wait(40)
         if isHopping then
-            blacklistedServers[targetId] = true -- Add to blacklist if it times out
+            blacklistedServers[targetId] = true 
+            failedAttempts = failedAttempts + 1
             isHopping = false
-            StatusLabel.Text = "TP Timed out. Blacklisted & Retrying..."
+            StatusLabel.Text = "TP Timed out. Blacklisted..."
             StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         end
     end)
 end
 
 -------------------------------------------------------------------------------
--- 4. THE BULLDOZER SCANNER
+-- 4. THE BULLDOZER SCANNER (WITH HAIL MARY FALLBACK)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
+    
+    -- If we have failed 3 times in a row, wipe the blacklist to prevent it from getting too large
+    if failedAttempts >= 3 then
+        blacklistedServers = {}
+        StatusLabel.Text = "Loop Detected! Cooldown (15s)..."
+        StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        task.wait(15) -- Give Roblox API a massive breather
+        failedAttempts = 0
+    end
     
     task.spawn(function()
         local cursor = ""
@@ -134,7 +146,6 @@ local function performHop()
                 local validServers = {}
                 
                 for _, srv in pairs(result.data) do
-                    -- ONLY check servers that are NOT blacklisted
                     if srv.id ~= game.JobId and srv.playing and not blacklistedServers[srv.id] then
                         if srv.playing >= 2 and srv.playing <= 5 then
                             table.insert(validServers, srv)
@@ -159,28 +170,37 @@ local function performHop()
                 end
             else
                 rateLimitRetries = rateLimitRetries + 1
-                if rateLimitRetries > 5 then
-                    break 
+                if rateLimitRetries > 3 then
+                    break -- Bail out early so we don't catch a permanent rate limit IP ban
                 end
                 
-                StatusLabel.Text = "Rate limited. Waiting 3s..."
+                StatusLabel.Text = "Rate limited. Waiting 10s..."
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                task.wait(3)
+                task.wait(10) -- Increased wait time to actually appease Roblox's spam filter
             end
         end
         
+        -- HAIL MARY FALLBACK: If we completely fail to scan or all 1s are blacklisted
         if fallbackOne then
             executeTeleport(fallbackOne, "1 player fallback")
         else
-            StatusLabel.Text = "Scan failed. Retrying in 5s..."
-            task.wait(5)
+            StatusLabel.Text = "API Blocked. Emergency random hop!"
+            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
+            failedAttempts = failedAttempts + 1
+            
+            -- This bypasses specific IDs and just tells Roblox "put me anywhere but here"
+            pcall(function()
+                TeleportService:Teleport(PlaceId, LocalPlayer)
+            end)
+            
+            task.wait(20)
             isHopping = false 
         end
     end)
 end
 
 -------------------------------------------------------------------------------
--- 5. ERROR POPUP CRUSHER (10 SEC OVERRIDE)
+-- 5. ERROR POPUP CRUSHER
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(0.5) do
