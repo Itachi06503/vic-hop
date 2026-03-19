@@ -47,25 +47,32 @@ StatusLabel.TextSize = 14
 StatusLabel.TextWrapped = true
 
 -------------------------------------------------------------------------------
--- 2. STATE VARIABLES
+-- 2. STATE VARIABLES & BLACKLIST
 -------------------------------------------------------------------------------
 local atlasExecuted = false
 local isHopping = false
 local hopCountdown = 15 
 local forceHopTimer = false 
 
+local blacklistedServers = {} -- Stores broken server IDs
+local currentTargetId = nil   -- The server we are currently trying to join
+
 -------------------------------------------------------------------------------
--- 3. SAFER TELEPORT LOGIC (40 SECONDS + ERROR CATCHING)
+-- 3. SAFER TELEPORT LOGIC + BLACKLISTING
 -------------------------------------------------------------------------------
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
     if player == LocalPlayer then
+        if currentTargetId then
+            blacklistedServers[currentTargetId] = true -- Add broken server to blacklist
+        end
         isHopping = false
-        StatusLabel.Text = "TP Failed by Roblox! Retrying..."
+        StatusLabel.Text = "Roblox TP Fail! Blacklisted & Retrying..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
     end
 end)
 
 local function executeTeleport(targetId, pCountLabel)
+    currentTargetId = targetId
     StatusLabel.Text = "Teleporting (" .. pCountLabel .. ")..."
     StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
     
@@ -74,19 +81,21 @@ local function executeTeleport(targetId, pCountLabel)
     end)
     
     if not success then
-        StatusLabel.Text = "TP Error: " .. string.sub(tostring(err), 1, 15)
+        blacklistedServers[targetId] = true
+        StatusLabel.Text = "TP Error! Blacklisting..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         task.wait(3)
         isHopping = false
         return
     end
     
-    -- Give Roblox MUCH longer to actually teleport you!
+    -- Timeout Watchdog
     task.spawn(function()
         task.wait(40)
         if isHopping then
+            blacklistedServers[targetId] = true -- Add to blacklist if it times out
             isHopping = false
-            StatusLabel.Text = "TP Timed out. Retrying..."
+            StatusLabel.Text = "TP Timed out. Blacklisted & Retrying..."
             StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         end
     end)
@@ -125,7 +134,8 @@ local function performHop()
                 local validServers = {}
                 
                 for _, srv in pairs(result.data) do
-                    if srv.id ~= game.JobId and srv.playing then
+                    -- ONLY check servers that are NOT blacklisted
+                    if srv.id ~= game.JobId and srv.playing and not blacklistedServers[srv.id] then
                         if srv.playing >= 2 and srv.playing <= 5 then
                             table.insert(validServers, srv)
                         elseif srv.playing == 1 and not fallbackOne then
