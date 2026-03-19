@@ -55,7 +55,7 @@ local hopCountdown = 30
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. THE STRICT HOPPER FUNCTION (ORIGINAL RELIABLE VERSION)
+-- 3. THE HOPPER FUNCTION (FIXED FOR BSS 6-PLAYER LIMIT)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -74,8 +74,9 @@ local function performHop()
         if success and result and result.data then
             local validServers = {}
             for _, srv in pairs(result.data) do
-                -- STRICT FILTER: At least 2 players, and at least 3 EMPTY SLOTS (prevents friend re-join)
-                if srv.playing and srv.playing >= 2 and srv.playing <= (srv.maxPlayers - 3) and srv.id ~= game.JobId then
+                -- FIXED FILTER: Look for at least 1 empty slot (srv.playing < srv.maxPlayers)
+                -- This allows servers with 1 to 5 players in BSS, avoiding full 6/6 servers.
+                if srv.playing and srv.playing >= 1 and srv.playing < srv.maxPlayers and srv.id ~= game.JobId then
                     table.insert(validServers, srv.id)
                 end
             end
