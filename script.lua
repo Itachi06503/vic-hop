@@ -3,6 +3,7 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(5) 
 
 local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local GuiService = game:GetService("GuiService")
@@ -10,6 +11,9 @@ local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
+
+-- Grab Delta's internal HTTP request function (this is what their Server Hop button uses)
+local deltaRequest = request or http_request or (http and http.request) or syn.request
 
 -------------------------------------------------------------------------------
 -- 1. SIMPLE UI
@@ -54,24 +58,66 @@ local hopCountdown = 30
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. NATIVE HOPPER (NO HTTP / NO PROXY)
+-- 3. DELTA-POWERED HOPPER (NO PROXY, NO REJOINS)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Triggering Native Hop..."
-    StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+    StatusLabel.Text = "Delta Matchmaking..."
+    StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
-    -- This is the exact command executor buttons use to force a random matchmake
-    -- No HTTP requests = No proxy failures.
-    pcall(function()
-        TeleportService:Teleport(PlaceId, LocalPlayer)
-    end)
-    
-    -- If it takes longer than 10 seconds to teleport, reset so it can try again
     task.spawn(function()
-        task.wait(10)
-        isHopping = false
+        if not deltaRequest then
+            StatusLabel.Text = "Executor missing 'request'!"
+            task.wait(5)
+            isHopping = false
+            return
+        end
+
+        local sortOrder = (math.random() > 0.5) and "Asc" or "Desc"
+        local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100"
+        
+        -- Use Delta's request function to bypass restrictions
+        local success, response = pcall(function()
+            return deltaRequest({
+                Url = url,
+                Method = "GET"
+            })
+        end)
+
+        if success and response and response.Body then
+            local decoded = HttpService:JSONDecode(response.Body)
+            if decoded and decoded.data then
+                local validServers = {}
+                for _, srv in pairs(decoded.data) do
+                    -- BLOCK THE CURRENT SERVER (id ~= game.JobId) and leave 3 empty slots
+                    if srv.playing and srv.playing >= 2 and srv.playing <= (srv.maxPlayers - 3) and srv.id ~= game.JobId then
+                        table.insert(validServers, srv.id)
+                    end
+                end
+                
+                if #validServers > 0 then
+                    -- Pick a completely random new server
+                    local randomId = validServers[math.random(1, #validServers)]
+                    StatusLabel.Text = "Teleporting..."
+                    StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+                    
+                    TeleportService:TeleportToPlaceInstance(PlaceId, randomId, LocalPlayer)
+                else
+                    StatusLabel.Text = "No good servers. Retrying..."
+                    task.wait(5)
+                    isHopping = false 
+                end
+            else
+                StatusLabel.Text = "Bad Data. Retrying..."
+                task.wait(5)
+                isHopping = false
+            end
+        else
+            StatusLabel.Text = "Request Failed. Retrying..."
+            task.wait(5)
+            isHopping = false 
+        end
     end)
 end
 
