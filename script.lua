@@ -55,7 +55,7 @@ local hopCountdown = 15
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. RATE-LIMIT-PROOF DEEP SCAN HOPPER
+-- 3. THE BULLDOZER SCANNER (PUSHES THROUGH BLOCKS)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -63,12 +63,13 @@ local function performHop()
     
     task.spawn(function()
         local cursor = ""
-        local fallbackThree = nil
         local fallbackOne = nil
+        local page = 1
+        local maxPages = 50
+        local rateLimitRetries = 0
         
-        -- Scan up to 20 pages, waiting 1 second between pages to avoid bans
-        for page = 1, 20 do
-            StatusLabel.Text = "Scanning page " .. page .. "/20..."
+        while page <= maxPages do
+            StatusLabel.Text = "Digging Pg " .. page .. "..."
             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
             
             local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100"
@@ -82,51 +83,53 @@ local function performHop()
             end)
             
             if success and result and result.data then
-                local twosPool = {}
+                rateLimitRetries = 0 -- We got data, reset our retry counter!
+                local validServers = {}
                 
                 for _, srv in pairs(result.data) do
                     if srv.id ~= game.JobId and srv.playing then
-                        if srv.playing == 2 then
-                            table.insert(twosPool, srv.id)
-                        elseif srv.playing == 3 and not fallbackThree then
-                            fallbackThree = srv.id 
+                        -- Grab anything between 2 and 5 players
+                        if srv.playing >= 2 and srv.playing <= 5 then
+                            table.insert(validServers, srv)
                         elseif srv.playing == 1 and not fallbackOne then
                             fallbackOne = srv.id   
                         end
                     end
                 end
                 
-                -- We found a 2! Let's go!
-                if #twosPool > 0 then
-                    local targetId = twosPool[math.random(1, #twosPool)]
-                    StatusLabel.Text = "Teleporting (2 players)..."
+                -- We broke through the wall!
+                if #validServers > 0 then
+                    local target = validServers[math.random(1, #validServers)]
+                    StatusLabel.Text = "Teleporting (" .. target.playing .. " players)..."
                     StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-                    TeleportService:TeleportToPlaceInstance(PlaceId, targetId, LocalPlayer)
+                    TeleportService:TeleportToPlaceInstance(PlaceId, target.id, LocalPlayer)
                     return 
                 end
                 
                 -- Move to next page IF it exists
                 if result.nextPageCursor then
                     cursor = result.nextPageCursor
-                    task.wait(1) -- CRITICAL FIX: 1 second delay bypasses the Roblox block
+                    page = page + 1
+                    task.wait(0.5) 
                 else
-                    break 
+                    break -- We hit the absolute end of the Roblox server list
                 end
             else
-                -- If we STILL get blocked, note it on the UI so we know
-                StatusLabel.Text = "Roblox blocked scan on Pg " .. page
-                task.wait(2)
-                break 
+                -- ROBLOX BLOCKED US! Do NOT give up. Wait 3 seconds and try the same page again.
+                rateLimitRetries = rateLimitRetries + 1
+                if rateLimitRetries > 5 then
+                    break -- Okay, it's permanently stuck, we have to bail
+                end
+                
+                StatusLabel.Text = "Rate limited. Waiting 3s..."
+                StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+                task.wait(3)
             end
         end
         
-        -- Use fallbacks if we scanned thoroughly and found no 2s
-        if fallbackThree then
-            StatusLabel.Text = "Teleporting (3 players)..."
-            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-            TeleportService:TeleportToPlaceInstance(PlaceId, fallbackThree, LocalPlayer)
-        elseif fallbackOne then
-            StatusLabel.Text = "Teleporting (1 player)..."
+        -- If we somehow scanned 5,000 servers and there were strictly ONLY 1s
+        if fallbackOne then
+            StatusLabel.Text = "Teleporting (1 player fallback)..."
             StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
             TeleportService:TeleportToPlaceInstance(PlaceId, fallbackOne, LocalPlayer)
         else
@@ -188,7 +191,6 @@ task.spawn(function()
         local viciousHere = isViciousAlive()
 
         if viciousHere then
-            -- Vicious is alive! Have we loaded Atlas yet?
             if not atlasExecuted then
                 StatusLabel.Text = "Vicious Found! Loading Atlas..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
@@ -202,7 +204,6 @@ task.spawn(function()
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
             end
         else
-            -- Vicious is NOT here. 
             if atlasExecuted then
                 StatusLabel.Text = "Vicious Dead! Collecting Loot..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
@@ -210,7 +211,6 @@ task.spawn(function()
                 task.wait(5)
                 performHop()
             else
-                -- Normal hunting sequence
                 if hopCountdown > 0 then
                     if forceHopTimer then
                         StatusLabel.Text = "Error Recovery: Hop in " .. hopCountdown .. "s"
