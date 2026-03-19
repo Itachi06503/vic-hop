@@ -55,22 +55,22 @@ local hopCountdown = 15
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. DEEP SCAN HOPPER (SEARCHES MULTIPLE PAGES FOR 2s/3s)
+-- 3. HEAVY-DUTY DEEP SCAN HOPPER (SCANS UP TO 50 PAGES)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Deep scanning servers..."
-    StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
         local cursor = ""
-        local targetId = nil
-        local foundPlayers = 0
-        local fallbackId = nil
+        local fallbackThree = nil
+        local fallbackOne = nil
         
-        -- Scan up to 10 pages (1,000 servers) to dig past the wall of 1-player servers
-        for i = 1, 10 do
+        -- Scan up to 50 pages (5,000 servers) to break through the 1-player wall
+        for page = 1, 50 do
+            StatusLabel.Text = "Scanning page " .. page .. "..."
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
+            
             local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100"
             if cursor ~= "" then
                 url = url .. "&cursor=" .. cursor
@@ -82,62 +82,53 @@ local function performHop()
             end)
             
             if success and result and result.data then
-                local validServers = {}
+                local twosPool = {}
                 
                 for _, srv in pairs(result.data) do
-                    if srv.id ~= game.JobId then
-                        -- Save a 1-player server just in case we NEVER find a 2
-                        if srv.playing == 1 and not fallbackId then
-                            fallbackId = srv.id 
-                        -- If it's 2 or more, add it to our valid list!
-                        elseif srv.playing >= 2 then
-                            table.insert(validServers, srv)
+                    if srv.id ~= game.JobId and srv.playing then
+                        if srv.playing == 2 then
+                            table.insert(twosPool, srv.id)
+                        elseif srv.playing == 3 and not fallbackThree then
+                            fallbackThree = srv.id -- Save the first 3 we find just in case
+                        elseif srv.playing == 1 and not fallbackOne then
+                            fallbackOne = srv.id   -- Save the first 1 we find as a last resort
                         end
                     end
                 end
                 
-                -- Did we find any 2+ servers on this page?
-                if #validServers > 0 then
-                    local minP = math.huge
-                    local bestServers = {}
-                    
-                    -- Find the lowest number (2, 3, etc.)
-                    for _, srv in pairs(validServers) do
-                        if srv.playing < minP then minP = srv.playing end
-                    end
-                    
-                    -- Group them up
-                    for _, srv in pairs(validServers) do
-                        if srv.playing == minP then table.insert(bestServers, srv.id) end
-                    end
-                    
-                    targetId = bestServers[math.random(1, #bestServers)]
-                    foundPlayers = minP
-                    break -- We found what we wanted, stop scanning pages!
+                -- If we found ANY 2s on this page, stop digging and teleport!
+                if #twosPool > 0 then
+                    local targetId = twosPool[math.random(1, #twosPool)]
+                    StatusLabel.Text = "Teleporting (2 players)..."
+                    StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+                    TeleportService:TeleportToPlaceInstance(PlaceId, targetId, LocalPlayer)
+                    return 
+                end
+                
+                -- Move to next page
+                if result.nextPageCursor then
+                    cursor = result.nextPageCursor
+                    task.wait(0.1) -- Tiny delay to prevent Roblox from blocking us (Error 429)
                 else
-                    -- No 2+ servers here. Get the cursor for the next page and loop again.
-                    if result.nextPageCursor then
-                        cursor = result.nextPageCursor
-                    else
-                        break -- We hit the end of the server list
-                    end
+                    break -- We hit the absolute end of the server list
                 end
             else
-                break -- HTTP error, exit loop
+                -- If Roblox blocks the request, break out and use whatever fallbacks we already found
+                break 
             end
         end
         
-        -- Choose our target (The 2/3 server if we found one, or the 1 server as a fallback)
-        local finalId = targetId or fallbackId
-        
-        if finalId then
-            local pCountText = targetId and tostring(foundPlayers) or "1 (Fallback)"
-            StatusLabel.Text = "Teleporting (" .. pCountText .. " players)..."
+        -- If we scanned all those pages and NEVER found a 2, use our fallbacks
+        if fallbackThree then
+            StatusLabel.Text = "Teleporting (3 players)..."
             StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-            
-            TeleportService:TeleportToPlaceInstance(PlaceId, finalId, LocalPlayer)
+            TeleportService:TeleportToPlaceInstance(PlaceId, fallbackThree, LocalPlayer)
+        elseif fallbackOne then
+            StatusLabel.Text = "Teleporting (1 player)..."
+            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+            TeleportService:TeleportToPlaceInstance(PlaceId, fallbackOne, LocalPlayer)
         else
-            StatusLabel.Text = "Scan failed. Retrying..."
+            StatusLabel.Text = "Scan failed. Retrying in 5s..."
             task.wait(5)
             isHopping = false 
         end
