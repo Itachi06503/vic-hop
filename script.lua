@@ -55,12 +55,12 @@ local hopCountdown = 15
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. TELEPORT WATCHDOG (PREVENTS GETTING STUCK)
+-- 3. SAFER TELEPORT LOGIC (40 SECONDS + ERROR CATCHING)
 -------------------------------------------------------------------------------
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
     if player == LocalPlayer then
         isHopping = false
-        StatusLabel.Text = "TP Error! Retrying..."
+        StatusLabel.Text = "TP Failed by Roblox! Retrying..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
     end
 end)
@@ -69,13 +69,21 @@ local function executeTeleport(targetId, pCountLabel)
     StatusLabel.Text = "Teleporting (" .. pCountLabel .. ")..."
     StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
     
-    pcall(function()
+    local success, err = pcall(function()
         TeleportService:TeleportToPlaceInstance(PlaceId, targetId, LocalPlayer)
     end)
     
-    -- If 15 seconds pass and we are still in this server, the teleport failed silently
+    if not success then
+        StatusLabel.Text = "TP Error: " .. string.sub(tostring(err), 1, 15)
+        StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        task.wait(3)
+        isHopping = false
+        return
+    end
+    
+    -- Give Roblox MUCH longer to actually teleport you!
     task.spawn(function()
-        task.wait(15)
+        task.wait(40)
         if isHopping then
             isHopping = false
             StatusLabel.Text = "TP Timed out. Retrying..."
@@ -85,7 +93,7 @@ local function executeTeleport(targetId, pCountLabel)
 end
 
 -------------------------------------------------------------------------------
--- 4. THE BULLDOZER SCANNER (PUSHES THROUGH BLOCKS)
+-- 4. THE BULLDOZER SCANNER
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -113,12 +121,11 @@ local function performHop()
             end)
             
             if success and result and result.data then
-                rateLimitRetries = 0 -- We got data, reset our retry counter!
+                rateLimitRetries = 0 
                 local validServers = {}
                 
                 for _, srv in pairs(result.data) do
                     if srv.id ~= game.JobId and srv.playing then
-                        -- Grab anything between 2 and 5 players
                         if srv.playing >= 2 and srv.playing <= 5 then
                             table.insert(validServers, srv)
                         elseif srv.playing == 1 and not fallbackOne then
@@ -127,26 +134,23 @@ local function performHop()
                     end
                 end
                 
-                -- We broke through the wall!
                 if #validServers > 0 then
                     local target = validServers[math.random(1, #validServers)]
                     executeTeleport(target.id, target.playing .. " players")
                     return 
                 end
                 
-                -- Move to next page IF it exists
                 if result.nextPageCursor then
                     cursor = result.nextPageCursor
                     page = page + 1
                     task.wait(0.5) 
                 else
-                    break -- We hit the absolute end of the Roblox server list
+                    break 
                 end
             else
-                -- ROBLOX BLOCKED US! Do NOT give up. Wait 3 seconds and try the same page again.
                 rateLimitRetries = rateLimitRetries + 1
                 if rateLimitRetries > 5 then
-                    break -- Okay, it's permanently stuck, we have to bail
+                    break 
                 end
                 
                 StatusLabel.Text = "Rate limited. Waiting 3s..."
@@ -155,7 +159,6 @@ local function performHop()
             end
         end
         
-        -- If we somehow scanned 5,000 servers and there were strictly ONLY 1s
         if fallbackOne then
             executeTeleport(fallbackOne, "1 player fallback")
         else
