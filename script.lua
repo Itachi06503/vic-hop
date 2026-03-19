@@ -55,12 +55,12 @@ local hopCountdown = 15
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. THE "SMALLEST SERVER" HOPPER
+-- 3. THE "AGED SERVER" HOPPER (WITH 1-PLAYER FALLBACK)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Hunting smallest server..."
+    StatusLabel.Text = "Hunting aged server..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
@@ -73,15 +73,27 @@ local function performHop()
         if success and result and result.data then
             local minPlayers = math.huge
             local smallestServers = {}
+            local hasOnePlayerServers = false
 
+            -- Pass 1: Find the lowest player count (2 or more). Note if 1s exist.
             for _, srv in pairs(result.data) do
-                if srv.playing and srv.playing >= 1 and srv.id ~= game.JobId then
-                    if srv.playing < minPlayers then
-                        minPlayers = srv.playing
+                if srv.playing and srv.id ~= game.JobId then
+                    if srv.playing >= 2 then
+                        if srv.playing < minPlayers then
+                            minPlayers = srv.playing
+                        end
+                    elseif srv.playing == 1 then
+                        hasOnePlayerServers = true
                     end
                 end
             end
 
+            -- Failsafe: If no servers have 2+ players, but 1-player servers exist, drop our standards to 1
+            if minPlayers == math.huge and hasOnePlayerServers then
+                minPlayers = 1
+            end
+
+            -- Pass 2: Collect all the servers that share our target player count
             if minPlayers ~= math.huge then
                 for _, srv in pairs(result.data) do
                     if srv.playing == minPlayers and srv.id ~= game.JobId then
@@ -90,6 +102,7 @@ local function performHop()
                 end
             end
             
+            -- Pick a random one from the valid pool
             if #smallestServers > 0 then
                 local targetId = smallestServers[math.random(1, #smallestServers)]
                 StatusLabel.Text = "Found " .. tostring(minPlayers) .. " player server!"
@@ -170,22 +183,22 @@ task.spawn(function()
                     loadstring(game:HttpGet("https://raw.githubusercontent.com/Chris12089/atlasbss/main/script.lua"))()
                 end)
             else
-                -- Atlas is loaded, we are fighting it. Update UI to show we're waiting.
+                -- Atlas is loaded, we are fighting it.
                 StatusLabel.Text = "Killing Vicious..."
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
             end
         else
             -- Vicious is NOT here. 
             if atlasExecuted then
-                -- If we previously loaded Atlas, it means Vicious just died!
+                -- Vicious just died!
                 StatusLabel.Text = "Vicious Dead! Collecting Loot..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
-                -- Wait 5 seconds to ensure Atlas picks up the stingers/loot
+                -- Wait 5 seconds to grab stingers
                 task.wait(5)
                 performHop()
             else
-                -- Normal hunting sequence (no Vicious yet)
+                -- Normal hunting sequence
                 if hopCountdown > 0 then
                     if forceHopTimer then
                         StatusLabel.Text = "Error Recovery: Hop in " .. hopCountdown .. "s"
