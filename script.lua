@@ -3,7 +3,6 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(5) 
 
 local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local GuiService = game:GetService("GuiService")
@@ -55,49 +54,24 @@ local hopCountdown = 30
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. THE PROXY HOPPER FUNCTION (RATE LIMIT BYPASS)
+-- 3. NATIVE HOPPER (NO HTTP / NO PROXY)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Fetching Proxy Server..."
-    StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
+    StatusLabel.Text = "Triggering Native Hop..."
+    StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
     
+    -- This is the exact command executor buttons use to force a random matchmake
+    -- No HTTP requests = No proxy failures.
+    pcall(function()
+        TeleportService:Teleport(PlaceId, LocalPlayer)
+    end)
+    
+    -- If it takes longer than 10 seconds to teleport, reset so it can try again
     task.spawn(function()
-        local sortOrder = (math.random() > 0.5) and "Asc" or "Desc"
-        
-        -- THE FIX: Using RoProxy instead of Roblox directly to bypass IP rate limits
-        local url = "https://games.roproxy.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100"
-        
-        local success, result = pcall(function()
-            return HttpService:JSONDecode(game:HttpGet(url))
-        end)
-
-        if success and result and result.data then
-            local validServers = {}
-            for _, srv in pairs(result.data) do
-                -- Strict filter: Leave at least 3 slots empty so friends don't trigger a redirect
-                if srv.playing and srv.playing >= 2 and srv.playing <= (srv.maxPlayers - 3) and srv.id ~= game.JobId then
-                    table.insert(validServers, srv.id)
-                end
-            end
-            
-            if #validServers > 0 then
-                local randomId = validServers[math.random(1, #validServers)]
-                StatusLabel.Text = "Teleporting..."
-                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-                
-                TeleportService:TeleportToPlaceInstance(PlaceId, randomId, LocalPlayer)
-            else
-                StatusLabel.Text = "No good servers. Retrying..."
-                task.wait(5)
-                isHopping = false 
-            end
-        else
-            StatusLabel.Text = "Proxy Failed. Retrying..."
-            task.wait(5)
-            isHopping = false 
-        end
+        task.wait(10)
+        isHopping = false
     end)
 end
 
