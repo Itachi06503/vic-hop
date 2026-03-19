@@ -51,7 +51,7 @@ StatusLabel.TextWrapped = true
 -------------------------------------------------------------------------------
 local atlasExecuted = false
 local isHopping = false
-local hopCountdown = 30 
+local hopCountdown = 15 -- Reduced from 30 to 15 seconds!
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
