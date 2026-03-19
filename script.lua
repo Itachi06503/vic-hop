@@ -12,9 +12,6 @@ local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 
--- Grab Delta's internal HTTP request function (this is what their Server Hop button uses)
-local deltaRequest = request or http_request or (http and http.request) or syn.request
-
 -------------------------------------------------------------------------------
 -- 1. SIMPLE UI
 -------------------------------------------------------------------------------
@@ -58,63 +55,44 @@ local hopCountdown = 30
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. DELTA-POWERED HOPPER (NO PROXY, NO REJOINS)
+-- 3. THE STRICT HOPPER FUNCTION (ORIGINAL RELIABLE VERSION)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Delta Matchmaking..."
+    StatusLabel.Text = "Fetching empty server..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
-        if not deltaRequest then
-            StatusLabel.Text = "Executor missing 'request'!"
-            task.wait(5)
-            isHopping = false
-            return
-        end
-
         local sortOrder = (math.random() > 0.5) and "Asc" or "Desc"
         local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100"
         
-        -- Use Delta's request function to bypass restrictions
-        local success, response = pcall(function()
-            return deltaRequest({
-                Url = url,
-                Method = "GET"
-            })
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(game:HttpGet(url))
         end)
 
-        if success and response and response.Body then
-            local decoded = HttpService:JSONDecode(response.Body)
-            if decoded and decoded.data then
-                local validServers = {}
-                for _, srv in pairs(decoded.data) do
-                    -- BLOCK THE CURRENT SERVER (id ~= game.JobId) and leave 3 empty slots
-                    if srv.playing and srv.playing >= 2 and srv.playing <= (srv.maxPlayers - 3) and srv.id ~= game.JobId then
-                        table.insert(validServers, srv.id)
-                    end
+        if success and result and result.data then
+            local validServers = {}
+            for _, srv in pairs(result.data) do
+                -- STRICT FILTER: At least 2 players, and at least 3 EMPTY SLOTS (prevents friend re-join)
+                if srv.playing and srv.playing >= 2 and srv.playing <= (srv.maxPlayers - 3) and srv.id ~= game.JobId then
+                    table.insert(validServers, srv.id)
                 end
+            end
+            
+            if #validServers > 0 then
+                local randomId = validServers[math.random(1, #validServers)]
+                StatusLabel.Text = "Teleporting..."
+                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
                 
-                if #validServers > 0 then
-                    -- Pick a completely random new server
-                    local randomId = validServers[math.random(1, #validServers)]
-                    StatusLabel.Text = "Teleporting..."
-                    StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-                    
-                    TeleportService:TeleportToPlaceInstance(PlaceId, randomId, LocalPlayer)
-                else
-                    StatusLabel.Text = "No good servers. Retrying..."
-                    task.wait(5)
-                    isHopping = false 
-                end
+                TeleportService:TeleportToPlaceInstance(PlaceId, randomId, LocalPlayer)
             else
-                StatusLabel.Text = "Bad Data. Retrying..."
+                StatusLabel.Text = "No good servers. Retrying..."
                 task.wait(5)
-                isHopping = false
+                isHopping = false 
             end
         else
-            StatusLabel.Text = "Request Failed. Retrying..."
+            StatusLabel.Text = "HTTP Failed. Retrying..."
             task.wait(5)
             isHopping = false 
         end
