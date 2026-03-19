@@ -1,6 +1,6 @@
 -- Wait for the game to fully load
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(5) -- Give the map a moment to load in
+task.wait(5) 
 
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
@@ -51,47 +51,53 @@ StatusLabel.TextWrapped = true
 -------------------------------------------------------------------------------
 local atlasExecuted = false
 local isHopping = false
-local hopCountdown = 30 -- Default wait time if no Vicious is found
+local hopCountdown = 30 
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. THE HOPPER FUNCTION
+-- 3. THE STRICT HOPPER FUNCTION
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Fetching new server..."
+    StatusLabel.Text = "Fetching empty server..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
-    local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Desc&limit=100"
-    
-    local success, result = pcall(function()
-        return HttpService:JSONDecode(game:HttpGet(url))
-    end)
-
-    if success and result and result.data then
-        local validServers = {}
-        for _, srv in pairs(result.data) do
-            if srv.playing and srv.playing < (srv.maxPlayers - 1) and srv.id ~= game.JobId then
-                table.insert(validServers, srv.id)
-            end
-        end
+    task.spawn(function()
+        -- Randomize Asc/Desc so we don't always pull the exact same top 100 list
+        local sortOrder = (math.random() > 0.5) and "Asc" or "Desc"
+        local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100"
         
-        if #validServers > 0 then
-            local randomId = validServers[math.random(1, #validServers)]
-            StatusLabel.Text = "Teleporting..."
-            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-            TeleportService:TeleportToPlaceInstance(PlaceId, randomId, LocalPlayer)
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(game:HttpGet(url))
+        end)
+
+        if success and result and result.data then
+            local validServers = {}
+            for _, srv in pairs(result.data) do
+                -- STRICT FILTER: At least 2 players (no ghost servers), and at least 3 EMPTY SLOTS
+                if srv.playing and srv.playing >= 2 and srv.playing <= (srv.maxPlayers - 3) and srv.id ~= game.JobId then
+                    table.insert(validServers, srv.id)
+                end
+            end
+            
+            if #validServers > 0 then
+                local randomId = validServers[math.random(1, #validServers)]
+                StatusLabel.Text = "Teleporting..."
+                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+                
+                TeleportService:TeleportToPlaceInstance(PlaceId, randomId, LocalPlayer)
+            else
+                StatusLabel.Text = "No good servers. Retrying..."
+                task.wait(5)
+                isHopping = false -- Reset so it tries again
+            end
         else
-            StatusLabel.Text = "Servers full. Retrying in 5s..."
+            StatusLabel.Text = "HTTP Failed. Retrying..."
             task.wait(5)
-            isHopping = false
+            isHopping = false -- Reset so it tries again
         end
-    else
-        StatusLabel.Text = "HTTP Failed. Retrying in 5s..."
-        task.wait(5)
-        isHopping = false
-    end
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -107,11 +113,11 @@ task.spawn(function()
                     -- 1. Click away the error
                     GuiService:ClearError() 
                     
-                    -- 2. Override our normal timeline and force a 10s hop
+                    -- 2. Override timeline, force 10s hop, completely reset the hopper state
                     StatusLabel.Text = "Error cleared! Hopping in 10s..."
                     StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
                     
-                    isHopping = false -- Reset just in case we were stuck mid-hop
+                    isHopping = false 
                     hopCountdown = 10
                     forceHopTimer = true 
                 end
@@ -142,10 +148,7 @@ end
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
-        -- If we already ran Atlas, just chill.
         if atlasExecuted then continue end 
-        
-        -- If we are actively trying to teleport, pause the countdown.
         if isHopping then continue end 
         
         -- Step 1: Check for Vicious
