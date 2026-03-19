@@ -55,7 +55,7 @@ local hopCountdown = 15
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. HEAVY-DUTY DEEP SCAN HOPPER (SCANS UP TO 50 PAGES)
+-- 3. RATE-LIMIT-PROOF DEEP SCAN HOPPER
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -66,9 +66,9 @@ local function performHop()
         local fallbackThree = nil
         local fallbackOne = nil
         
-        -- Scan up to 50 pages (5,000 servers) to break through the 1-player wall
-        for page = 1, 50 do
-            StatusLabel.Text = "Scanning page " .. page .. "..."
+        -- Scan up to 20 pages, waiting 1 second between pages to avoid bans
+        for page = 1, 20 do
+            StatusLabel.Text = "Scanning page " .. page .. "/20..."
             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
             
             local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100"
@@ -89,14 +89,14 @@ local function performHop()
                         if srv.playing == 2 then
                             table.insert(twosPool, srv.id)
                         elseif srv.playing == 3 and not fallbackThree then
-                            fallbackThree = srv.id -- Save the first 3 we find just in case
+                            fallbackThree = srv.id 
                         elseif srv.playing == 1 and not fallbackOne then
-                            fallbackOne = srv.id   -- Save the first 1 we find as a last resort
+                            fallbackOne = srv.id   
                         end
                     end
                 end
                 
-                -- If we found ANY 2s on this page, stop digging and teleport!
+                -- We found a 2! Let's go!
                 if #twosPool > 0 then
                     local targetId = twosPool[math.random(1, #twosPool)]
                     StatusLabel.Text = "Teleporting (2 players)..."
@@ -105,20 +105,22 @@ local function performHop()
                     return 
                 end
                 
-                -- Move to next page
+                -- Move to next page IF it exists
                 if result.nextPageCursor then
                     cursor = result.nextPageCursor
-                    task.wait(0.1) -- Tiny delay to prevent Roblox from blocking us (Error 429)
+                    task.wait(1) -- CRITICAL FIX: 1 second delay bypasses the Roblox block
                 else
-                    break -- We hit the absolute end of the server list
+                    break 
                 end
             else
-                -- If Roblox blocks the request, break out and use whatever fallbacks we already found
+                -- If we STILL get blocked, note it on the UI so we know
+                StatusLabel.Text = "Roblox blocked scan on Pg " .. page
+                task.wait(2)
                 break 
             end
         end
         
-        -- If we scanned all those pages and NEVER found a 2, use our fallbacks
+        -- Use fallbacks if we scanned thoroughly and found no 2s
         if fallbackThree then
             StatusLabel.Text = "Teleporting (3 players)..."
             StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
