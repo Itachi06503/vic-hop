@@ -1,6 +1,6 @@
 -- Wait for the game to fully load
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(5)
+task.wait(5) -- Give the map a moment to load in
 
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
@@ -40,22 +40,31 @@ MainFrame.Draggable = true
 local StatusLabel = Instance.new("TextLabel", MainFrame)
 StatusLabel.Size = UDim2.new(1, 0, 1, 0)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Checking Vicious..."
+StatusLabel.Text = "Initializing..."
 StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLabel.Font = Enum.Font.Code
 StatusLabel.TextSize = 14
 StatusLabel.TextWrapped = true
 
 -------------------------------------------------------------------------------
--- 2. BARE METAL HOPPING
+-- 2. STATE VARIABLES
 -------------------------------------------------------------------------------
-local function forceHop()
-    StatusLabel.Text = "Fetching servers..."
+local atlasExecuted = false
+local isHopping = false
+local hopCountdown = 30 -- Default wait time if no Vicious is found
+local forceHopTimer = false 
+
+-------------------------------------------------------------------------------
+-- 3. THE HOPPER FUNCTION
+-------------------------------------------------------------------------------
+local function performHop()
+    if isHopping then return end
+    isHopping = true
+    StatusLabel.Text = "Fetching new server..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Desc&limit=100"
     
-    -- Simplest possible HTTP request, guaranteed to work on any executor
     local success, result = pcall(function()
         return HttpService:JSONDecode(game:HttpGet(url))
     end)
@@ -74,15 +83,45 @@ local function forceHop()
             StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
             TeleportService:TeleportToPlaceInstance(PlaceId, randomId, LocalPlayer)
         else
-            StatusLabel.Text = "Servers full. Retrying..."
+            StatusLabel.Text = "Servers full. Retrying in 5s..."
+            task.wait(5)
+            isHopping = false
         end
     else
-        StatusLabel.Text = "HTTP Get Failed."
+        StatusLabel.Text = "HTTP Failed. Retrying in 5s..."
+        task.wait(5)
+        isHopping = false
     end
 end
 
 -------------------------------------------------------------------------------
--- 3. VICIOUS DETECTOR & EXECUTION
+-- 4. ERROR POPUP CRUSHER (10 SEC OVERRIDE)
+-------------------------------------------------------------------------------
+task.spawn(function()
+    while task.wait(0.5) do
+        pcall(function()
+            local prompt = CoreGui:FindFirstChild("RobloxPromptGui")
+            if prompt and prompt:FindFirstChild("promptOverlay") then
+                local errorPrompt = prompt.promptOverlay:FindFirstChild("ErrorPrompt")
+                if errorPrompt and errorPrompt.Visible then
+                    -- 1. Click away the error
+                    GuiService:ClearError() 
+                    
+                    -- 2. Override our normal timeline and force a 10s hop
+                    StatusLabel.Text = "Error cleared! Hopping in 10s..."
+                    StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+                    
+                    isHopping = false -- Reset just in case we were stuck mid-hop
+                    hopCountdown = 10
+                    forceHopTimer = true 
+                end
+            end
+        end)
+    end
+end)
+
+-------------------------------------------------------------------------------
+-- 5. VICIOUS DETECTOR
 -------------------------------------------------------------------------------
 local function isViciousAlive()
     local folders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
@@ -98,40 +137,42 @@ local function isViciousAlive()
     return false
 end
 
-local atlasExecuted = false
-
--- Keep error boxes closed automatically in the background
+-------------------------------------------------------------------------------
+-- 6. MAIN TIMELINE LOOP
+-------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
-        pcall(function()
-            local prompt = CoreGui:FindFirstChild("RobloxPromptGui")
-            if prompt and prompt:FindFirstChild("promptOverlay") then 
-                GuiService:ClearError() 
-            end
-        end)
-    end
-end)
-
--- Main Loop
-task.spawn(function()
-    while task.wait(3) do
+        -- If we already ran Atlas, just chill.
+        if atlasExecuted then continue end 
+        
+        -- If we are actively trying to teleport, pause the countdown.
+        if isHopping then continue end 
+        
+        -- Step 1: Check for Vicious
         if isViciousAlive() then
-            if not atlasExecuted then
-                StatusLabel.Text = "Vicious Found! Loading Atlas..."
-                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-                atlasExecuted = true
-                
-                pcall(function()
-                    loadstring(game:HttpGet("https://raw.githubusercontent.com/Chris12089/atlasbss/main/script.lua"))()
-                end)
+            StatusLabel.Text = "Vicious Found! Loading Atlas..."
+            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+            atlasExecuted = true
+            
+            pcall(function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/Chris12089/atlasbss/main/script.lua"))()
+            end)
+            continue
+        end
+        
+        -- Step 2: No Vicious? Run the countdown
+        if hopCountdown > 0 then
+            if forceHopTimer then
+                StatusLabel.Text = "Error Recovery: Hop in " .. hopCountdown .. "s"
+                StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
             else
-                StatusLabel.Text = "Atlas Active. Fighting..."
+                StatusLabel.Text = "No Vicious. Hopping in " .. hopCountdown .. "s"
+                StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
             end
+            hopCountdown = hopCountdown - 1
         else
-            if not atlasExecuted then
-                forceHop()
-                task.wait(12) -- Give Roblox time to teleport before trying again
-            end
+            -- Step 3: Countdown hit 0, time to hop
+            performHop()
         end
     end
 end)
