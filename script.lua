@@ -51,7 +51,7 @@ StatusLabel.TextWrapped = true
 -------------------------------------------------------------------------------
 local atlasExecuted = false
 local isHopping = false
-local hopCountdown = 15 -- Reduced from 30 to 15 seconds!
+local hopCountdown = 15 
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
@@ -64,7 +64,6 @@ local function performHop()
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
-        -- Hardcoded to "Asc" (Ascending) so Roblox gives us the emptiest servers first
         local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100&_=" .. tostring(math.random(10000, 99999))
         
         local success, result = pcall(function()
@@ -75,7 +74,6 @@ local function performHop()
             local minPlayers = math.huge
             local smallestServers = {}
 
-            -- Pass 1: Find what the lowest active player count actually is
             for _, srv in pairs(result.data) do
                 if srv.playing and srv.playing >= 1 and srv.id ~= game.JobId then
                     if srv.playing < minPlayers then
@@ -84,7 +82,6 @@ local function performHop()
                 end
             end
 
-            -- Pass 2: Collect all the servers that share that tiny player count
             if minPlayers ~= math.huge then
                 for _, srv in pairs(result.data) do
                     if srv.playing == minPlayers and srv.id ~= game.JobId then
@@ -93,7 +90,6 @@ local function performHop()
                 end
             end
             
-            -- Pick a random one from the smallest available (so you don't join the exact same one as other hoppers)
             if #smallestServers > 0 then
                 local targetId = smallestServers[math.random(1, #smallestServers)]
                 StatusLabel.Text = "Found " .. tostring(minPlayers) .. " player server!"
@@ -159,34 +155,50 @@ end
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
-        if atlasExecuted then continue end 
         if isHopping then continue end 
         
-        -- Step 1: Check for Vicious
-        if isViciousAlive() then
-            StatusLabel.Text = "Vicious Found! Loading Atlas..."
-            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-            atlasExecuted = true
-            
-            pcall(function()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/Chris12089/atlasbss/main/script.lua"))()
-            end)
-            continue
-        end
-        
-        -- Step 2: No Vicious? Run the countdown
-        if hopCountdown > 0 then
-            if forceHopTimer then
-                StatusLabel.Text = "Error Recovery: Hop in " .. hopCountdown .. "s"
-                StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        local viciousHere = isViciousAlive()
+
+        if viciousHere then
+            -- Vicious is alive! Have we loaded Atlas yet?
+            if not atlasExecuted then
+                StatusLabel.Text = "Vicious Found! Loading Atlas..."
+                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+                atlasExecuted = true
+                
+                pcall(function()
+                    loadstring(game:HttpGet("https://raw.githubusercontent.com/Chris12089/atlasbss/main/script.lua"))()
+                end)
             else
-                StatusLabel.Text = "No Vicious. Hopping in " .. hopCountdown .. "s"
-                StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
+                -- Atlas is loaded, we are fighting it. Update UI to show we're waiting.
+                StatusLabel.Text = "Killing Vicious..."
+                StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
             end
-            hopCountdown = hopCountdown - 1
         else
-            -- Step 3: Countdown hit 0, time to hop
-            performHop()
+            -- Vicious is NOT here. 
+            if atlasExecuted then
+                -- If we previously loaded Atlas, it means Vicious just died!
+                StatusLabel.Text = "Vicious Dead! Collecting Loot..."
+                StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
+                
+                -- Wait 5 seconds to ensure Atlas picks up the stingers/loot
+                task.wait(5)
+                performHop()
+            else
+                -- Normal hunting sequence (no Vicious yet)
+                if hopCountdown > 0 then
+                    if forceHopTimer then
+                        StatusLabel.Text = "Error Recovery: Hop in " .. hopCountdown .. "s"
+                        StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+                    else
+                        StatusLabel.Text = "No Vicious. Hopping in " .. hopCountdown .. "s"
+                        StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
+                    end
+                    hopCountdown = hopCountdown - 1
+                else
+                    performHop()
+                end
+            end
         end
     end
 end)
