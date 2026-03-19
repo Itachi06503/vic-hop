@@ -55,38 +55,51 @@ local hopCountdown = 30
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. THE HOPPER FUNCTION (FIXED FOR BSS 6-PLAYER LIMIT)
+-- 3. THE "SMALLEST SERVER" HOPPER
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
-    StatusLabel.Text = "Fetching empty server..."
+    StatusLabel.Text = "Hunting smallest server..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
     
     task.spawn(function()
-        local sortOrder = (math.random() > 0.5) and "Asc" or "Desc"
-        local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100"
+        -- Hardcoded to "Asc" (Ascending) so Roblox gives us the emptiest servers first
+        local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100&_=" .. tostring(math.random(10000, 99999))
         
         local success, result = pcall(function()
             return HttpService:JSONDecode(game:HttpGet(url))
         end)
 
         if success and result and result.data then
-            local validServers = {}
+            local minPlayers = math.huge
+            local smallestServers = {}
+
+            -- Pass 1: Find what the lowest active player count actually is
             for _, srv in pairs(result.data) do
-                -- FIXED FILTER: Look for at least 1 empty slot (srv.playing < srv.maxPlayers)
-                -- This allows servers with 1 to 5 players in BSS, avoiding full 6/6 servers.
-                if srv.playing and srv.playing >= 1 and srv.playing < srv.maxPlayers and srv.id ~= game.JobId then
-                    table.insert(validServers, srv.id)
+                if srv.playing and srv.playing >= 1 and srv.id ~= game.JobId then
+                    if srv.playing < minPlayers then
+                        minPlayers = srv.playing
+                    end
+                end
+            end
+
+            -- Pass 2: Collect all the servers that share that tiny player count
+            if minPlayers ~= math.huge then
+                for _, srv in pairs(result.data) do
+                    if srv.playing == minPlayers and srv.id ~= game.JobId then
+                        table.insert(smallestServers, srv.id)
+                    end
                 end
             end
             
-            if #validServers > 0 then
-                local randomId = validServers[math.random(1, #validServers)]
-                StatusLabel.Text = "Teleporting..."
+            -- Pick a random one from the smallest available (so you don't join the exact same one as other hoppers)
+            if #smallestServers > 0 then
+                local targetId = smallestServers[math.random(1, #smallestServers)]
+                StatusLabel.Text = "Found " .. tostring(minPlayers) .. " player server!"
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
                 
-                TeleportService:TeleportToPlaceInstance(PlaceId, randomId, LocalPlayer)
+                TeleportService:TeleportToPlaceInstance(PlaceId, targetId, LocalPlayer)
             else
                 StatusLabel.Text = "No good servers. Retrying..."
                 task.wait(5)
