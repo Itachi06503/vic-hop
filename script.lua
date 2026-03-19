@@ -12,7 +12,7 @@ local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 
--- Grab Delta's internal HTTP request function
+-- Grab Delta's internal HTTP request function (this is what their Server Hop button uses)
 local deltaRequest = request or http_request or (http and http.request) or syn.request
 
 -------------------------------------------------------------------------------
@@ -54,7 +54,7 @@ StatusLabel.TextWrapped = true
 -------------------------------------------------------------------------------
 local atlasExecuted = false
 local isHopping = false
-local hopCountdown = 12 -- Reduced to 12 seconds for much faster hopping!
+local hopCountdown = 30 
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
@@ -77,6 +77,7 @@ local function performHop()
         local sortOrder = (math.random() > 0.5) and "Asc" or "Desc"
         local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=" .. sortOrder .. "&limit=100"
         
+        -- Use Delta's request function to bypass restrictions
         local success, response = pcall(function()
             return deltaRequest({
                 Url = url,
@@ -96,6 +97,7 @@ local function performHop()
                 end
                 
                 if #validServers > 0 then
+                    -- Pick a completely random new server
                     local randomId = validServers[math.random(1, #validServers)]
                     StatusLabel.Text = "Teleporting..."
                     StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
