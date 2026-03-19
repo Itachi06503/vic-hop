@@ -55,7 +55,37 @@ local hopCountdown = 15
 local forceHopTimer = false 
 
 -------------------------------------------------------------------------------
--- 3. THE BULLDOZER SCANNER (PUSHES THROUGH BLOCKS)
+-- 3. TELEPORT WATCHDOG (PREVENTS GETTING STUCK)
+-------------------------------------------------------------------------------
+TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+    if player == LocalPlayer then
+        isHopping = false
+        StatusLabel.Text = "TP Error! Retrying..."
+        StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+    end
+end)
+
+local function executeTeleport(targetId, pCountLabel)
+    StatusLabel.Text = "Teleporting (" .. pCountLabel .. ")..."
+    StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+    
+    pcall(function()
+        TeleportService:TeleportToPlaceInstance(PlaceId, targetId, LocalPlayer)
+    end)
+    
+    -- If 15 seconds pass and we are still in this server, the teleport failed silently
+    task.spawn(function()
+        task.wait(15)
+        if isHopping then
+            isHopping = false
+            StatusLabel.Text = "TP Timed out. Retrying..."
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        end
+    end)
+end
+
+-------------------------------------------------------------------------------
+-- 4. THE BULLDOZER SCANNER (PUSHES THROUGH BLOCKS)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -100,9 +130,7 @@ local function performHop()
                 -- We broke through the wall!
                 if #validServers > 0 then
                     local target = validServers[math.random(1, #validServers)]
-                    StatusLabel.Text = "Teleporting (" .. target.playing .. " players)..."
-                    StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-                    TeleportService:TeleportToPlaceInstance(PlaceId, target.id, LocalPlayer)
+                    executeTeleport(target.id, target.playing .. " players")
                     return 
                 end
                 
@@ -129,9 +157,7 @@ local function performHop()
         
         -- If we somehow scanned 5,000 servers and there were strictly ONLY 1s
         if fallbackOne then
-            StatusLabel.Text = "Teleporting (1 player fallback)..."
-            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-            TeleportService:TeleportToPlaceInstance(PlaceId, fallbackOne, LocalPlayer)
+            executeTeleport(fallbackOne, "1 player fallback")
         else
             StatusLabel.Text = "Scan failed. Retrying in 5s..."
             task.wait(5)
@@ -141,7 +167,7 @@ local function performHop()
 end
 
 -------------------------------------------------------------------------------
--- 4. ERROR POPUP CRUSHER (10 SEC OVERRIDE)
+-- 5. ERROR POPUP CRUSHER (10 SEC OVERRIDE)
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(0.5) do
@@ -165,7 +191,7 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 5. VICIOUS DETECTOR
+-- 6. VICIOUS DETECTOR
 -------------------------------------------------------------------------------
 local function isViciousAlive()
     local folders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
@@ -182,7 +208,7 @@ local function isViciousAlive()
 end
 
 -------------------------------------------------------------------------------
--- 6. MAIN TIMELINE LOOP
+-- 7. MAIN TIMELINE LOOP
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
