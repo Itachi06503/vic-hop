@@ -8,12 +8,22 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local GuiService = game:GetService("GuiService")
 local CoreGui = game:GetService("CoreGui")
+local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 
 -------------------------------------------------------------------------------
--- 1. SIMPLE UI
+-- 1. OVERNIGHT ANTI-AFK
+-------------------------------------------------------------------------------
+-- Prevents the 20-minute idle disconnect by simulating a right-click
+LocalPlayer.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+end)
+
+-------------------------------------------------------------------------------
+-- 2. SIMPLE UI
 -------------------------------------------------------------------------------
 pcall(function()
     local hiddenGui = gethui and gethui() or CoreGui
@@ -47,25 +57,23 @@ StatusLabel.TextSize = 14
 StatusLabel.TextWrapped = true
 
 -------------------------------------------------------------------------------
--- 2. STATE VARIABLES & BLACKLIST
+-- 3. STATE VARIABLES & BLACKLIST
 -------------------------------------------------------------------------------
 local atlasExecuted = false
 local isHopping = false
 local hopCountdown = 15 
-local forceHopTimer = false 
+local hopStartTime = 0 -- Used for the Global Watchdog
 
 local blacklistedServers = {} 
 local currentTargetId = nil   
-local failedAttempts = 0 -- Tracks how many times we've been stuck in the loop
+local failedAttempts = 0 
 
 -------------------------------------------------------------------------------
--- 3. SAFER TELEPORT LOGIC + LOOP BREAKER
+-- 4. SAFER TELEPORT LOGIC
 -------------------------------------------------------------------------------
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
     if player == LocalPlayer then
-        if currentTargetId then
-            blacklistedServers[currentTargetId] = true 
-        end
+        if currentTargetId then blacklistedServers[currentTargetId] = true end
         failedAttempts = failedAttempts + 1
         isHopping = false
         StatusLabel.Text = "Roblox TP Fail! Blacklisted..."
@@ -91,32 +99,21 @@ local function executeTeleport(targetId, pCountLabel)
         isHopping = false
         return
     end
-    
-    task.spawn(function()
-        task.wait(40)
-        if isHopping then
-            blacklistedServers[targetId] = true 
-            failedAttempts = failedAttempts + 1
-            isHopping = false
-            StatusLabel.Text = "TP Timed out. Blacklisted..."
-            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-        end
-    end)
 end
 
 -------------------------------------------------------------------------------
--- 4. THE BULLDOZER SCANNER (WITH HAIL MARY FALLBACK)
+-- 5. THE BULLDOZER SCANNER
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
+    hopStartTime = os.time() -- Start the watchdog timer
     
-    -- If we have failed 3 times in a row, wipe the blacklist to prevent it from getting too large
     if failedAttempts >= 3 then
         blacklistedServers = {}
         StatusLabel.Text = "Loop Detected! Cooldown (15s)..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-        task.wait(15) -- Give Roblox API a massive breather
+        task.wait(15) 
         failedAttempts = 0
     end
     
@@ -132,9 +129,7 @@ local function performHop()
             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
             
             local url = "https://games.roblox.com/v1/games/" .. tostring(PlaceId) .. "/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100"
-            if cursor ~= "" then
-                url = url .. "&cursor=" .. cursor
-            end
+            if cursor ~= "" then url = url .. "&cursor=" .. cursor end
             url = url .. "&_=" .. tostring(math.random(10000, 99999))
             
             local success, result = pcall(function()
@@ -170,17 +165,14 @@ local function performHop()
                 end
             else
                 rateLimitRetries = rateLimitRetries + 1
-                if rateLimitRetries > 3 then
-                    break -- Bail out early so we don't catch a permanent rate limit IP ban
-                end
+                if rateLimitRetries > 3 then break end
                 
                 StatusLabel.Text = "Rate limited. Waiting 10s..."
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                task.wait(10) -- Increased wait time to actually appease Roblox's spam filter
+                task.wait(10) 
             end
         end
         
-        -- HAIL MARY FALLBACK: If we completely fail to scan or all 1s are blacklisted
         if fallbackOne then
             executeTeleport(fallbackOne, "1 player fallback")
         else
@@ -188,11 +180,7 @@ local function performHop()
             StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
             failedAttempts = failedAttempts + 1
             
-            -- This bypasses specific IDs and just tells Roblox "put me anywhere but here"
-            pcall(function()
-                TeleportService:Teleport(PlaceId, LocalPlayer)
-            end)
-            
+            pcall(function() TeleportService:Teleport(PlaceId, LocalPlayer) end)
             task.wait(20)
             isHopping = false 
         end
@@ -200,10 +188,10 @@ local function performHop()
 end
 
 -------------------------------------------------------------------------------
--- 5. ERROR POPUP CRUSHER
+-- 6. HARD-RECONNECT ERROR CRUSHER
 -------------------------------------------------------------------------------
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(1) do
         pcall(function()
             local prompt = CoreGui:FindFirstChild("RobloxPromptGui")
             if prompt and prompt:FindFirstChild("promptOverlay") then
@@ -211,12 +199,12 @@ task.spawn(function()
                 if errorPrompt and errorPrompt.Visible then
                     GuiService:ClearError() 
                     
-                    StatusLabel.Text = "Error cleared! Hopping in 10s..."
+                    StatusLabel.Text = "DISCONNECTED! Forcing reconnect..."
                     StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
                     
-                    isHopping = false 
-                    hopCountdown = 10
-                    forceHopTimer = true 
+                    -- If the internet blips or server crashes, forcefully throw them into a new server
+                    TeleportService:Teleport(PlaceId, LocalPlayer)
+                    task.wait(10)
                 end
             end
         end)
@@ -224,7 +212,7 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 6. VICIOUS DETECTOR
+-- 7. VICIOUS DETECTOR
 -------------------------------------------------------------------------------
 local function isViciousAlive()
     local folders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
@@ -241,11 +229,20 @@ local function isViciousAlive()
 end
 
 -------------------------------------------------------------------------------
--- 7. MAIN TIMELINE LOOP
+-- 8. MAIN TIMELINE LOOP & WATCHDOG
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
-        if isHopping then continue end 
+        -- GLOBAL WATCHDOG: If the script has been "hopping" for over 120 seconds, it's frozen.
+        if isHopping then
+            if os.time() - hopStartTime > 120 then
+                isHopping = false
+                failedAttempts = failedAttempts + 1
+                StatusLabel.Text = "Watchdog Reset! Retrying hop..."
+                StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            end
+            continue 
+        end 
         
         local viciousHere = isViciousAlive()
 
@@ -271,13 +268,8 @@ task.spawn(function()
                 performHop()
             else
                 if hopCountdown > 0 then
-                    if forceHopTimer then
-                        StatusLabel.Text = "Error Recovery: Hop in " .. hopCountdown .. "s"
-                        StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                    else
-                        StatusLabel.Text = "No Vicious. Hopping in " .. hopCountdown .. "s"
-                        StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
-                    end
+                    StatusLabel.Text = "No Vicious. Hopping in " .. hopCountdown .. "s"
+                    StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
                     hopCountdown = hopCountdown - 1
                 else
                     performHop()
