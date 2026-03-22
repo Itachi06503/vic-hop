@@ -67,24 +67,26 @@ local hopStartTime = 0
 local blacklistedServers = {} 
 local currentTargetId = nil   
 local failedAttempts = 0 
-local lastFailTime = 0 -- Prevents Roblox from spam-counting 1 error as 5 errors
+local lastFailTime = 0 
 
 -------------------------------------------------------------------------------
--- 4. SAFER TELEPORT LOGIC
+-- 4. SAFER TELEPORT LOGIC (WITH HARD COOLDOWNS)
 -------------------------------------------------------------------------------
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
     if player == LocalPlayer then
         if currentTargetId then blacklistedServers[currentTargetId] = true end
         
-        -- Only count as a new fail if it's been at least 2 seconds since the last one
         if os.time() - lastFailTime > 2 then
             failedAttempts = failedAttempts + 1
             lastFailTime = os.time()
         end
         
-        isHopping = false
-        StatusLabel.Text = "Roblox TP Fail! Blacklisted..."
+        StatusLabel.Text = "Roblox TP Fail! 15s Cooldown..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        
+        -- THE FIX: Force a 15-second hard yield before unlocking the scanner
+        task.wait(15)
+        isHopping = false
     end
 end)
 
@@ -103,36 +105,37 @@ local function executeTeleport(targetId, pCountLabel)
             failedAttempts = failedAttempts + 1
             lastFailTime = os.time()
         end
-        StatusLabel.Text = "TP Error! Blacklisting..."
+        
+        StatusLabel.Text = "TP Error! 15s Cooldown..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-        task.wait(3)
+        
+        -- THE FIX: Force a 15-second hard yield here too
+        task.wait(15)
         isHopping = false
         return
     end
 end
 
 -------------------------------------------------------------------------------
--- 5. THE BULLDOZER SCANNER (FIXED LOOP BREAKER)
+-- 5. THE BULLDOZER SCANNER
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
     hopStartTime = os.time() 
     
-    -- THE FIX: Do NOT wipe the blacklist. Force a random hop to escape the broken servers!
     if failedAttempts >= 3 then
         StatusLabel.Text = "Loop! Forcing Random Hop..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-        failedAttempts = 0 -- Reset counter
+        failedAttempts = 0 
         
-        -- Bypass the custom scanner and use Roblox's default matchmaking
         pcall(function() TeleportService:Teleport(PlaceId, LocalPlayer) end)
         
         task.spawn(function()
             task.wait(20)
             isHopping = false 
         end)
-        return -- EXIT the function entirely so it doesn't scan!
+        return 
     end
     
     task.spawn(function()
@@ -159,7 +162,6 @@ local function performHop()
                 local validServers = {}
                 
                 for _, srv in pairs(result.data) do
-                    -- Blacklist is fully respected here
                     if srv.id ~= game.JobId and srv.playing and not blacklistedServers[srv.id] then
                         if srv.playing >= 2 and srv.playing <= 5 then
                             table.insert(validServers, srv)
@@ -186,9 +188,9 @@ local function performHop()
                 rateLimitRetries = rateLimitRetries + 1
                 if rateLimitRetries > 3 then break end
                 
-                StatusLabel.Text = "Rate limited. Waiting 10s..."
+                StatusLabel.Text = "Rate limited. Waiting 15s..."
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                task.wait(10) 
+                task.wait(15) 
             end
         end
         
