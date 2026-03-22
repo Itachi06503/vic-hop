@@ -9,6 +9,7 @@ local Workspace = game:GetService("Workspace")
 local GuiService = game:GetService("GuiService")
 local CoreGui = game:GetService("CoreGui")
 local VirtualUser = game:GetService("VirtualUser")
+local Lighting = game:GetService("Lighting")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -61,8 +62,8 @@ StatusLabel.TextWrapped = true
 -------------------------------------------------------------------------------
 local atlasExecuted = false
 local isHopping = false
-local hopCountdown = 15 
-local hopStartTime = 0 -- Used for the Global Watchdog
+local hopCountdown = 10 -- Reduced from 15 for faster nighttime scanning
+local hopStartTime = 0 
 
 local blacklistedServers = {} 
 local currentTargetId = nil   
@@ -107,7 +108,7 @@ end
 local function performHop()
     if isHopping then return end
     isHopping = true
-    hopStartTime = os.time() -- Start the watchdog timer
+    hopStartTime = os.time() 
     
     if failedAttempts >= 3 then
         blacklistedServers = {}
@@ -202,7 +203,6 @@ task.spawn(function()
                     StatusLabel.Text = "DISCONNECTED! Forcing reconnect..."
                     StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
                     
-                    -- If the internet blips or server crashes, forcefully throw them into a new server
                     TeleportService:Teleport(PlaceId, LocalPlayer)
                     task.wait(10)
                 end
@@ -229,11 +229,10 @@ local function isViciousAlive()
 end
 
 -------------------------------------------------------------------------------
--- 8. MAIN TIMELINE LOOP & WATCHDOG
+-- 8. MAIN TIMELINE LOOP & SMART CLOCK
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
-        -- GLOBAL WATCHDOG: If the script has been "hopping" for over 120 seconds, it's frozen.
         if isHopping then
             if os.time() - hopStartTime > 120 then
                 isHopping = false
@@ -267,12 +266,28 @@ task.spawn(function()
                 task.wait(5)
                 performHop()
             else
-                if hopCountdown > 0 then
-                    StatusLabel.Text = "No Vicious. Hopping in " .. hopCountdown .. "s"
-                    StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
-                    hopCountdown = hopCountdown - 1
+                -- **SMART CLOCK LOGIC**
+                local clockTime = Lighting.ClockTime
+                
+                -- In BSS, night falls around 18:00. If it's after 16:00, wait for night!
+                if clockTime >= 16 and clockTime < 18.2 then
+                    StatusLabel.Text = "Dusk ("..string.format("%.1f", clockTime).."). Waiting for night..."
+                    StatusLabel.TextColor3 = Color3.fromRGB(200, 150, 255)
                 else
-                    performHop()
+                    if hopCountdown > 0 then
+                        -- If it is daytime (between 6 AM and 4 PM), don't waste time. Fast hop!
+                        if clockTime > 6 and clockTime < 16 then
+                            StatusLabel.Text = "Daytime. Fast-hopping..."
+                            StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
+                            hopCountdown = 0 
+                        else
+                            StatusLabel.Text = "No Vicious. Hopping in " .. hopCountdown .. "s"
+                            StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
+                            hopCountdown = hopCountdown - 1
+                        end
+                    else
+                        performHop()
+                    end
                 end
             end
         end
