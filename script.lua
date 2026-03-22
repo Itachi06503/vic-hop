@@ -17,7 +17,6 @@ local PlaceId = game.PlaceId
 -------------------------------------------------------------------------------
 -- 1. OVERNIGHT ANTI-AFK
 -------------------------------------------------------------------------------
--- Prevents the 20-minute idle disconnect by simulating a right-click
 LocalPlayer.Idled:Connect(function()
     VirtualUser:CaptureController()
     VirtualUser:ClickButton2(Vector2.new())
@@ -62,12 +61,13 @@ StatusLabel.TextWrapped = true
 -------------------------------------------------------------------------------
 local atlasExecuted = false
 local isHopping = false
-local hopCountdown = 10 -- Reduced from 15 for faster nighttime scanning
+local hopCountdown = 10 
 local hopStartTime = 0 
 
 local blacklistedServers = {} 
 local currentTargetId = nil   
 local failedAttempts = 0 
+local lastFailTime = 0 -- Prevents Roblox from spam-counting 1 error as 5 errors
 
 -------------------------------------------------------------------------------
 -- 4. SAFER TELEPORT LOGIC
@@ -75,7 +75,13 @@ local failedAttempts = 0
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
     if player == LocalPlayer then
         if currentTargetId then blacklistedServers[currentTargetId] = true end
-        failedAttempts = failedAttempts + 1
+        
+        -- Only count as a new fail if it's been at least 2 seconds since the last one
+        if os.time() - lastFailTime > 2 then
+            failedAttempts = failedAttempts + 1
+            lastFailTime = os.time()
+        end
+        
         isHopping = false
         StatusLabel.Text = "Roblox TP Fail! Blacklisted..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
@@ -93,7 +99,10 @@ local function executeTeleport(targetId, pCountLabel)
     
     if not success then
         blacklistedServers[targetId] = true
-        failedAttempts = failedAttempts + 1
+        if os.time() - lastFailTime > 2 then
+            failedAttempts = failedAttempts + 1
+            lastFailTime = os.time()
+        end
         StatusLabel.Text = "TP Error! Blacklisting..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         task.wait(3)
@@ -103,19 +112,27 @@ local function executeTeleport(targetId, pCountLabel)
 end
 
 -------------------------------------------------------------------------------
--- 5. THE BULLDOZER SCANNER
+-- 5. THE BULLDOZER SCANNER (FIXED LOOP BREAKER)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
     isHopping = true
     hopStartTime = os.time() 
     
+    -- THE FIX: Do NOT wipe the blacklist. Force a random hop to escape the broken servers!
     if failedAttempts >= 3 then
-        blacklistedServers = {}
-        StatusLabel.Text = "Loop Detected! Cooldown (15s)..."
+        StatusLabel.Text = "Loop! Forcing Random Hop..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-        task.wait(15) 
-        failedAttempts = 0
+        failedAttempts = 0 -- Reset counter
+        
+        -- Bypass the custom scanner and use Roblox's default matchmaking
+        pcall(function() TeleportService:Teleport(PlaceId, LocalPlayer) end)
+        
+        task.spawn(function()
+            task.wait(20)
+            isHopping = false 
+        end)
+        return -- EXIT the function entirely so it doesn't scan!
     end
     
     task.spawn(function()
@@ -142,6 +159,7 @@ local function performHop()
                 local validServers = {}
                 
                 for _, srv in pairs(result.data) do
+                    -- Blacklist is fully respected here
                     if srv.id ~= game.JobId and srv.playing and not blacklistedServers[srv.id] then
                         if srv.playing >= 2 and srv.playing <= 5 then
                             table.insert(validServers, srv)
@@ -266,16 +284,13 @@ task.spawn(function()
                 task.wait(5)
                 performHop()
             else
-                -- **SMART CLOCK LOGIC**
                 local clockTime = Lighting.ClockTime
                 
-                -- In BSS, night falls around 18:00. If it's after 16:00, wait for night!
                 if clockTime >= 16 and clockTime < 18.2 then
                     StatusLabel.Text = "Dusk ("..string.format("%.1f", clockTime).."). Waiting for night..."
                     StatusLabel.TextColor3 = Color3.fromRGB(200, 150, 255)
                 else
                     if hopCountdown > 0 then
-                        -- If it is daytime (between 6 AM and 4 PM), don't waste time. Fast hop!
                         if clockTime > 6 and clockTime < 16 then
                             StatusLabel.Text = "Daytime. Fast-hopping..."
                             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
