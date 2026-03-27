@@ -1,4 +1,9 @@
--- Wait for the game to fully load using modern yielding
+-- ==============================================================================
+-- ⚙️ USER SETTINGS (WEBHOOK CONFIGURED)
+-- ==============================================================================
+local WebhookURL = "https://discord.com/api/webhooks/1487070973827219538/80wfTSKpFD4tYONg7oG4y6uqO3ayAdXrbwwIf6WjUySN7VaH5EDH110lWcfMThZBrCW9"
+
+-- Wait for the game to fully load
 if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(5) 
 
@@ -16,7 +21,59 @@ local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 
 -------------------------------------------------------------------------------
--- 1. OVERNIGHT ANTI-AFK
+-- 1. INSTANT MOBILE FPS BOOSTER (LOAD 3X FASTER)
+-------------------------------------------------------------------------------
+task.spawn(function()
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
+        Workspace.Terrain.Decoration = false
+        
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            if v:IsA("BasePart") and not v:IsA("Terrain") then
+                v.Material = Enum.Material.Plastic
+                v.Reflectance = 0
+            elseif v:IsA("Decal") or v:IsA("Texture") then
+                v.Transparency = 1
+            end
+        end
+    end)
+end)
+
+-------------------------------------------------------------------------------
+-- 2. DISCORD WEBHOOK FUNCTION
+-------------------------------------------------------------------------------
+local function sendDiscordLog(message)
+    if WebhookURL == "" or WebhookURL == "YOUR_WEBHOOK_URL_HERE" then return end
+    
+    task.spawn(function()
+        pcall(function()
+            local data = {
+                ["embeds"] = {{
+                    ["title"] = "🐝 Vicious Bee Defeated!",
+                    ["description"] = message,
+                    ["color"] = tonumber("0x00FF00"),
+                    ["footer"] = {["text"] = "Delta Mobile Auto-Hopper"}
+                }}
+            }
+            local jsonData = HttpService:JSONEncode(data)
+            local httpRequest = (request or http_request or HttpPost or syn.request)
+            
+            if httpRequest then
+                httpRequest({
+                    Url = WebhookURL,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = jsonData
+                })
+            end
+        end)
+    end)
+end
+
+-------------------------------------------------------------------------------
+-- 3. OVERNIGHT ANTI-AFK
 -------------------------------------------------------------------------------
 LocalPlayer.Idled:Connect(function()
     VirtualUser:CaptureController()
@@ -24,14 +81,13 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. MODERN UI CREATION & MEMORY CLEANUP
+-- 4. MODERN UI CREATION & MEMORY CLEANUP
 -------------------------------------------------------------------------------
 pcall(function()
     local hiddenGui = gethui and gethui() or CoreGui
     for _, v in ipairs(hiddenGui:GetChildren()) do 
         if v.Name == "VicDetectorUI" then v:Destroy() end 
     end
-    
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if playerGui then
         for _, v in ipairs(playerGui:GetChildren()) do 
@@ -44,7 +100,6 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "VicDetectorUI"
 ScreenGui.ResetOnSpawn = false
 
--- Delta specific safe-UI mounting
 local successMount = pcall(function() ScreenGui.Parent = gethui() end)
 if not successMount or not ScreenGui.Parent then 
     ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") 
@@ -66,7 +121,7 @@ local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Name = "StatusLabel"
 StatusLabel.Size = UDim2.new(1, 0, 1, 0)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Initializing..."
+StatusLabel.Text = "Initializing Booster..."
 StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLabel.Font = Enum.Font.Code
 StatusLabel.TextSize = 14
@@ -74,7 +129,7 @@ StatusLabel.TextWrapped = true
 StatusLabel.Parent = MainFrame
 
 -------------------------------------------------------------------------------
--- 3. STATE VARIABLES & BLACKLIST
+-- 5. STATE VARIABLES & BLACKLIST
 -------------------------------------------------------------------------------
 local atlasExecuted = false
 local isHopping = false
@@ -87,7 +142,7 @@ local failedAttempts = 0
 local lastFailTime = 0 
 
 -------------------------------------------------------------------------------
--- 4. SAFER TELEPORT LOGIC (WITH HARD COOLDOWNS)
+-- 6. SAFER TELEPORT LOGIC (WITH HARD COOLDOWNS)
 -------------------------------------------------------------------------------
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
     if player == LocalPlayer then
@@ -124,14 +179,13 @@ local function executeTeleport(targetId, pCountLabel)
         
         StatusLabel.Text = "TP Error! 15s Cooldown..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-        
         task.wait(15)
         isHopping = false
     end
 end
 
 -------------------------------------------------------------------------------
--- 5. THE GHOST-BUSTING SERVER SCANNER
+-- 7. THE PATIENT SERVER SCANNER (GHOST-PROOF)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -144,7 +198,6 @@ local function performHop()
         failedAttempts = 0 
         
         pcall(function() TeleportService:Teleport(PlaceId, LocalPlayer) end)
-        
         task.defer(function()
             task.wait(20)
             isHopping = false 
@@ -155,7 +208,7 @@ local function performHop()
     task.spawn(function()
         local cursor = ""
         local page = 1
-        local maxPages = 10 -- Reduced to prevent infinite digging
+        local maxPages = 50 
         local rateLimitRetries = 0
         
         local validServers = {}
@@ -177,8 +230,8 @@ local function performHop()
                 rateLimitRetries = 0 
                 
                 for _, srv in ipairs(result.data) do
-                    -- GHOST FILTER: Only accept servers with active FPS > 10
-                    if srv.id ~= game.JobId and not blacklistedServers[srv.id] and type(srv.fps) == "number" and srv.fps > 10 then
+                    -- GHOST FILTER: Requires active ping
+                    if srv.id ~= game.JobId and not blacklistedServers[srv.id] and type(srv.ping) == "number" then
                         if srv.playing >= 2 and srv.playing <= 5 then
                             table.insert(validServers, srv)
                         elseif srv.playing == 1 then
@@ -187,12 +240,8 @@ local function performHop()
                     end
                 end
                 
-                -- If we found good servers, prioritize them strictly (2 -> 3 -> 4 -> 5)
                 if #validServers > 0 then
-                    table.sort(validServers, function(a, b)
-                        return a.playing < b.playing
-                    end)
-                    
+                    table.sort(validServers, function(a, b) return a.playing < b.playing end)
                     local bestTarget = validServers[1]
                     executeTeleport(bestTarget.id, `{bestTarget.playing} players`)
                     return 
@@ -201,7 +250,7 @@ local function performHop()
                 if result.nextPageCursor then
                     cursor = result.nextPageCursor
                     page += 1
-                    task.wait(0.5) 
+                    task.wait(1.5) -- Prevents API Rate Limiting
                 else
                     break 
                 end
@@ -215,7 +264,6 @@ local function performHop()
             end
         end
         
-        -- Fallback sequence if NO 2-5 player servers exist
         if #fallbackServers > 0 then
             local target = fallbackServers[math.random(1, #fallbackServers)]
             executeTeleport(target.id, "1 player fallback")
@@ -223,7 +271,6 @@ local function performHop()
             StatusLabel.Text = "No Valid Servers! Random Hop..."
             StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
             failedAttempts += 1
-            
             pcall(function() TeleportService:Teleport(PlaceId, LocalPlayer) end)
             task.wait(20)
             isHopping = false 
@@ -232,7 +279,7 @@ local function performHop()
 end
 
 -------------------------------------------------------------------------------
--- 6. HARD-RECONNECT ERROR CRUSHER
+-- 8. HARD-RECONNECT ERROR CRUSHER
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
@@ -244,10 +291,8 @@ task.spawn(function()
                     local errorPrompt = overlay:FindFirstChild("ErrorPrompt")
                     if errorPrompt and errorPrompt.Visible then
                         GuiService:ClearError() 
-                        
                         StatusLabel.Text = "DISCONNECTED! Forcing reconnect..."
                         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                        
                         TeleportService:Teleport(PlaceId, LocalPlayer)
                         task.wait(10)
                     end
@@ -258,7 +303,7 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 7. VICIOUS DETECTOR (OPTIMIZED)
+-- 9. VICIOUS DETECTOR
 -------------------------------------------------------------------------------
 local function isViciousAlive()
     local folders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
@@ -275,7 +320,7 @@ local function isViciousAlive()
 end
 
 -------------------------------------------------------------------------------
--- 8. MAIN TIMELINE LOOP & SMART CLOCK
+-- 10. MAIN TIMELINE LOOP & STRICT NIGHT CLOCK
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
@@ -306,28 +351,28 @@ task.spawn(function()
             end
         else
             if atlasExecuted then
-                StatusLabel.Text = "Vicious Dead! Collecting Loot..."
+                StatusLabel.Text = "Looting! Triggering Webhook..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
+                
+                -- Fire the webhook to your Discord
+                sendDiscordLog(`Successfully collected loot in Server: ||{game.JobId}||`)
                 
                 task.wait(5)
                 performHop()
             else
                 local clockTime = Lighting.ClockTime
+                -- STRICT SPEED CHECK: True Nighttime is between ~17.5 (5:30 PM) and 6.0 (6:00 AM)
+                local isNight = clockTime >= 17.5 or clockTime < 6
                 
-                if clockTime >= 16 and clockTime < 18.2 then
-                    StatusLabel.Text = string.format("Dusk (%.1f). Waiting for night...", clockTime)
-                    StatusLabel.TextColor3 = Color3.fromRGB(200, 150, 255)
+                if not isNight then
+                    StatusLabel.Text = "Daytime/Dusk. Speed Skipping..."
+                    StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+                    performHop()
                 else
                     if hopCountdown > 0 then
-                        if clockTime > 6 and clockTime < 16 then
-                            StatusLabel.Text = "Daytime. Fast-hopping..."
-                            StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
-                            hopCountdown = 0 
-                        else
-                            StatusLabel.Text = `No Vicious. Hopping in {hopCountdown}s`
-                            StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
-                            hopCountdown -= 1
-                        end
+                        StatusLabel.Text = `Night Search. Hopping in {hopCountdown}s`
+                        StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
+                        hopCountdown -= 1
                     else
                         performHop()
                     end
