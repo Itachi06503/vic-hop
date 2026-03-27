@@ -16,6 +16,7 @@ local GuiService = game:GetService("GuiService")
 local CoreGui = game:GetService("CoreGui")
 local VirtualUser = game:GetService("VirtualUser")
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -42,19 +43,42 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. DISCORD WEBHOOK FUNCTION
+-- 2. LIVE INVENTORY TRACKER & DISCORD WEBHOOK
 -------------------------------------------------------------------------------
-local function sendDiscordLog(message)
+-- Safely fetches your exact Stinger count from the game's code
+local function getStingers()
+    local success, result = pcall(function()
+        local statCache = require(ReplicatedStorage:WaitForChild("ClientStatCache"))
+        return statCache:Get("Stingers")
+    end)
+    return (success and type(result) == "number") and result or 0
+end
+
+local function sendDiscordLog(gained, total)
     if WebhookURL == "" or WebhookURL == "YOUR_WEBHOOK_URL_HERE" then return end
     
     task.spawn(function()
         pcall(function()
+            local embedColor = gained > 0 and tonumber("0x00FF00") or tonumber("0xFFA500") -- Green if got stingers, Orange if 0
+            
             local data = {
                 ["embeds"] = {{
                     ["title"] = "🐝 Vicious Bee Defeated!",
-                    ["description"] = message,
-                    ["color"] = tonumber("0x00FF00"),
-                    ["footer"] = {["text"] = "Delta Mobile Auto-Hopper"}
+                    ["description"] = `Successfully cleared a server!\n**Server ID:** ||{game.JobId}||`,
+                    ["color"] = embedColor,
+                    ["fields"] = {
+                        {
+                            ["name"] = "🗡️ Stingers Gained",
+                            ["value"] = `+{gained}`,
+                            ["inline"] = true
+                        },
+                        {
+                            ["name"] = "🎒 Total Stingers",
+                            ["value"] = tostring(total),
+                            ["inline"] = true
+                        }
+                    },
+                    ["footer"] = {["text"] = "Delta Mobile Auto-Hopper • Smart Tracking"}
                 }}
             }
             local jsonData = HttpService:JSONEncode(data)
@@ -135,6 +159,7 @@ local atlasExecuted = false
 local isHopping = false
 local hopCountdown = 10 
 local hopStartTime = 0 
+local initialStingers = 0 -- To track stats
 
 local blacklistedServers = {} 
 local currentTargetId = nil   
@@ -230,7 +255,6 @@ local function performHop()
                 rateLimitRetries = 0 
                 
                 for _, srv in ipairs(result.data) do
-                    -- GHOST FILTER: Requires active ping
                     if srv.id ~= game.JobId and not blacklistedServers[srv.id] and type(srv.ping) == "number" then
                         if srv.playing >= 2 and srv.playing <= 5 then
                             table.insert(validServers, srv)
@@ -250,7 +274,7 @@ local function performHop()
                 if result.nextPageCursor then
                     cursor = result.nextPageCursor
                     page += 1
-                    task.wait(1.5) -- Prevents API Rate Limiting
+                    task.wait(1.5) 
                 else
                     break 
                 end
@@ -338,6 +362,9 @@ task.spawn(function()
 
         if viciousHere then
             if not atlasExecuted then
+                -- Log starting stingers BEFORE Atlas kills it
+                initialStingers = getStingers()
+                
                 StatusLabel.Text = "Vicious Found! Loading Atlas..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
                 atlasExecuted = true
@@ -354,10 +381,16 @@ task.spawn(function()
                 StatusLabel.Text = "Looting! Triggering Webhook..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
-                -- Fire the webhook to your Discord
-                sendDiscordLog(`Successfully collected loot in Server: ||{game.JobId}||`)
+                -- Wait 7 seconds to absolutely guarantee Atlas collects the Stinger tokens
+                task.wait(7)
                 
-                task.wait(5)
+                -- Calculate exact profits
+                local finalStingers = getStingers()
+                local gainedStingers = finalStingers - initialStingers
+                
+                -- Fire the advanced webhook to your Discord
+                sendDiscordLog(gainedStingers, finalStingers)
+                
                 performHop()
             else
                 local clockTime = Lighting.ClockTime
