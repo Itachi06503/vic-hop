@@ -16,7 +16,6 @@ local GuiService = game:GetService("GuiService")
 local CoreGui = game:GetService("CoreGui")
 local VirtualUser = game:GetService("VirtualUser")
 local Lighting = game:GetService("Lighting")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -43,19 +42,8 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. DISCORD WEBHOOK & BSS INVENTORY TRACKER
+-- 2. DISCORD WEBHOOK FUNCTION
 -------------------------------------------------------------------------------
-local statCache = nil
-pcall(function() statCache = require(ReplicatedStorage:WaitForChild("LocalStatCache")) end)
-
-local function getStingerCount()
-    if statCache then
-        local success, count = pcall(function() return statCache:Get("Stingers") end)
-        if success and type(count) == "number" then return count end
-    end
-    return 0
-end
-
 local function sendDiscordLog(message)
     if WebhookURL == "" or WebhookURL == "YOUR_WEBHOOK_URL_HERE" then return end
     
@@ -93,7 +81,7 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -------------------------------------------------------------------------------
--- 4. MODERN UI CREATION
+-- 4. MODERN UI CREATION & MEMORY CLEANUP
 -------------------------------------------------------------------------------
 pcall(function()
     local hiddenGui = gethui and gethui() or CoreGui
@@ -148,14 +136,13 @@ local isHopping = false
 local hopCountdown = 10 
 local hopStartTime = 0 
 
-local initialStingers = 0 -- Stores stingers before fight
 local blacklistedServers = {} 
 local currentTargetId = nil   
 local failedAttempts = 0 
 local lastFailTime = 0 
 
 -------------------------------------------------------------------------------
--- 6. SAFER TELEPORT LOGIC
+-- 6. SAFER TELEPORT LOGIC (WITH HARD COOLDOWNS)
 -------------------------------------------------------------------------------
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
     if player == LocalPlayer then
@@ -168,6 +155,7 @@ TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, erro
         
         StatusLabel.Text = "Roblox TP Fail! 15s Cooldown..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        
         task.wait(15)
         isHopping = false
     end
@@ -197,7 +185,7 @@ local function executeTeleport(targetId, pCountLabel)
 end
 
 -------------------------------------------------------------------------------
--- 7. THE REVERSE SERVER SCANNER (1-PLAYER BYPASS)
+-- 7. THE PATIENT SERVER SCANNER (GHOST-PROOF)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -208,6 +196,7 @@ local function performHop()
         StatusLabel.Text = "Loop! Forcing Random Hop..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         failedAttempts = 0 
+        
         pcall(function() TeleportService:Teleport(PlaceId, LocalPlayer) end)
         task.defer(function()
             task.wait(20)
@@ -219,7 +208,7 @@ local function performHop()
     task.spawn(function()
         local cursor = ""
         local page = 1
-        local maxPages = 20 
+        local maxPages = 50 
         local rateLimitRetries = 0
         
         local validServers = {}
@@ -229,8 +218,7 @@ local function performHop()
             StatusLabel.Text = `Scanning Pg {page}...`
             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
             
-            -- THE FIX: sortOrder=Desc starts from 5-player servers and goes down, skipping 1-player servers!
-            local url = `https://games.roblox.com/v1/games/{PlaceId}/servers/Public?sortOrder=Desc&excludeFullGames=true&limit=100`
+            local url = `https://games.roblox.com/v1/games/{PlaceId}/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100`
             if cursor ~= "" then url ..= `&cursor={cursor}` end
             url ..= `&_={math.random(10000, 99999)}`
             
@@ -242,8 +230,8 @@ local function performHop()
                 rateLimitRetries = 0 
                 
                 for _, srv in ipairs(result.data) do
+                    -- GHOST FILTER: Requires active ping
                     if srv.id ~= game.JobId and not blacklistedServers[srv.id] and type(srv.ping) == "number" then
-                        -- Since we sort descending, we will find 5s, 4s, 3s, and 2s first.
                         if srv.playing >= 2 and srv.playing <= 5 then
                             table.insert(validServers, srv)
                         elseif srv.playing == 1 then
@@ -253,7 +241,6 @@ local function performHop()
                 end
                 
                 if #validServers > 0 then
-                    -- We sort the batch we found so it prioritizes 2 players if they are on this page
                     table.sort(validServers, function(a, b) return a.playing < b.playing end)
                     local bestTarget = validServers[1]
                     executeTeleport(bestTarget.id, `{bestTarget.playing} players`)
@@ -263,13 +250,14 @@ local function performHop()
                 if result.nextPageCursor then
                     cursor = result.nextPageCursor
                     page += 1
-                    task.wait(1.5) 
+                    task.wait(1.5) -- Prevents API Rate Limiting
                 else
                     break 
                 end
             else
                 rateLimitRetries += 1
                 if rateLimitRetries > 3 then break end
+                
                 StatusLabel.Text = "Rate limited. Waiting 15s..."
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
                 task.wait(15) 
@@ -332,7 +320,7 @@ local function isViciousAlive()
 end
 
 -------------------------------------------------------------------------------
--- 10. MAIN TIMELINE LOOP
+-- 10. MAIN TIMELINE LOOP & STRICT NIGHT CLOCK
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
@@ -352,9 +340,6 @@ task.spawn(function()
             if not atlasExecuted then
                 StatusLabel.Text = "Vicious Found! Loading Atlas..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-                
-                -- Capture stingers BEFORE fighting
-                initialStingers = getStingerCount()
                 atlasExecuted = true
                 
                 pcall(function()
@@ -366,24 +351,17 @@ task.spawn(function()
             end
         else
             if atlasExecuted then
-                StatusLabel.Text = "Looting! Waiting 15s for tokens..."
+                StatusLabel.Text = "Looting! Triggering Webhook..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
-                -- Wait for Atlas to physically walk and collect the drops
-                task.wait(15) 
+                -- Fire the webhook to your Discord
+                sendDiscordLog(`Successfully collected loot in Server: ||{game.JobId}||`)
                 
-                -- Capture stingers AFTER fighting
-                local finalStingers = getStingerCount()
-                local earned = finalStingers - initialStingers
-                
-                -- Ensure it doesn't log negative numbers if memory hasn't updated
-                if earned < 0 then earned = 0 end 
-                
-                sendDiscordLog(`Successfully defeated Vicious Bee in Server: ||{game.JobId}||\n🍯 **Stingers Obtained:** {earned}\n🎒 **Total Stingers:** {finalStingers}`)
-                
+                task.wait(5)
                 performHop()
             else
                 local clockTime = Lighting.ClockTime
+                -- STRICT SPEED CHECK: True Nighttime is between ~17.5 (5:30 PM) and 6.0 (6:00 AM)
                 local isNight = clockTime >= 17.5 or clockTime < 6
                 
                 if not isNight then
