@@ -131,7 +131,7 @@ local function executeTeleport(targetId, pCountLabel)
 end
 
 -------------------------------------------------------------------------------
--- 5. THE BULLDOZER SCANNER
+-- 5. THE GHOST-BUSTING SERVER SCANNER
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -154,13 +154,15 @@ local function performHop()
     
     task.spawn(function()
         local cursor = ""
-        local fallbackOne = nil
         local page = 1
-        local maxPages = 50
+        local maxPages = 10 -- Reduced to prevent infinite digging
         local rateLimitRetries = 0
         
+        local validServers = {}
+        local fallbackServers = {}
+        
         while page <= maxPages do
-            StatusLabel.Text = `Digging Pg {page}...`
+            StatusLabel.Text = `Scanning Pg {page}...`
             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
             
             local url = `https://games.roblox.com/v1/games/{PlaceId}/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100`
@@ -173,21 +175,26 @@ local function performHop()
             
             if success and result and result.data then
                 rateLimitRetries = 0 
-                local validServers = {}
                 
                 for _, srv in ipairs(result.data) do
-                    if srv.id ~= game.JobId and srv.playing and not blacklistedServers[srv.id] then
+                    -- GHOST FILTER: Only accept servers with active FPS > 10
+                    if srv.id ~= game.JobId and not blacklistedServers[srv.id] and type(srv.fps) == "number" and srv.fps > 10 then
                         if srv.playing >= 2 and srv.playing <= 5 then
                             table.insert(validServers, srv)
-                        elseif srv.playing == 1 and not fallbackOne then
-                            fallbackOne = srv.id   
+                        elseif srv.playing == 1 then
+                            table.insert(fallbackServers, srv)
                         end
                     end
                 end
                 
+                -- If we found good servers, prioritize them strictly (2 -> 3 -> 4 -> 5)
                 if #validServers > 0 then
-                    local target = validServers[math.random(1, #validServers)]
-                    executeTeleport(target.id, `{target.playing} players`)
+                    table.sort(validServers, function(a, b)
+                        return a.playing < b.playing
+                    end)
+                    
+                    local bestTarget = validServers[1]
+                    executeTeleport(bestTarget.id, `{bestTarget.playing} players`)
                     return 
                 end
                 
@@ -208,10 +215,12 @@ local function performHop()
             end
         end
         
-        if fallbackOne then
-            executeTeleport(fallbackOne, "1 player fallback")
+        -- Fallback sequence if NO 2-5 player servers exist
+        if #fallbackServers > 0 then
+            local target = fallbackServers[math.random(1, #fallbackServers)]
+            executeTeleport(target.id, "1 player fallback")
         else
-            StatusLabel.Text = "API Blocked. Emergency random hop!"
+            StatusLabel.Text = "No Valid Servers! Random Hop..."
             StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
             failedAttempts += 1
             
