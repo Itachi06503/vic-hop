@@ -185,7 +185,7 @@ local function executeTeleport(targetId, pCountLabel)
 end
 
 -------------------------------------------------------------------------------
--- 7. THE PATIENT SERVER SCANNER (NO 1-PLAYER FALLBACK!)
+-- 7. THE PATIENT SERVER SCANNER (GHOST-PROOF)
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -212,6 +212,7 @@ local function performHop()
         local rateLimitRetries = 0
         
         local validServers = {}
+        local fallbackServers = {}
         
         while page <= maxPages do
             StatusLabel.Text = `Scanning Pg {page}...`
@@ -229,15 +230,16 @@ local function performHop()
                 rateLimitRetries = 0 
                 
                 for _, srv in ipairs(result.data) do
-                    -- GHOST FILTER + ONLY ACCEPT 2 TO 8 PLAYERS
+                    -- GHOST FILTER: Requires active ping
                     if srv.id ~= game.JobId and not blacklistedServers[srv.id] and type(srv.ping) == "number" then
-                        if srv.playing >= 2 and srv.playing <= 8 then
+                        if srv.playing >= 2 and srv.playing <= 5 then
                             table.insert(validServers, srv)
+                        elseif srv.playing == 1 then
+                            table.insert(fallbackServers, srv)
                         end
                     end
                 end
                 
-                -- IF WE FOUND SERVERS, HOP IMMEDIATELY
                 if #validServers > 0 then
                     table.sort(validServers, function(a, b) return a.playing < b.playing end)
                     local bestTarget = validServers[1]
@@ -248,27 +250,31 @@ local function performHop()
                 if result.nextPageCursor then
                     cursor = result.nextPageCursor
                     page += 1
-                    task.wait(2.2) -- Extra safe API delay to prevent it crashing at Page 9
+                    task.wait(1.5) -- Prevents API Rate Limiting
                 else
-                    break -- Roblox physically ran out of pages to give us
+                    break 
                 end
             else
                 rateLimitRetries += 1
-                if rateLimitRetries > 4 then break end
+                if rateLimitRetries > 3 then break end
                 
-                StatusLabel.Text = "API Slow. Retrying..."
+                StatusLabel.Text = "Rate limited. Waiting 15s..."
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                task.wait(10) 
+                task.wait(15) 
             end
         end
         
-        -- NO 1-PLAYER FALLBACK. IF IT FAILS, DO A NORMAL RANDOM REJOIN TO RESET.
-        StatusLabel.Text = "List Empty! Doing fresh Random Hop..."
-        StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
-        failedAttempts += 1
-        pcall(function() TeleportService:Teleport(PlaceId, LocalPlayer) end)
-        task.wait(20)
-        isHopping = false 
+        if #fallbackServers > 0 then
+            local target = fallbackServers[math.random(1, #fallbackServers)]
+            executeTeleport(target.id, "1 player fallback")
+        else
+            StatusLabel.Text = "No Valid Servers! Random Hop..."
+            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
+            failedAttempts += 1
+            pcall(function() TeleportService:Teleport(PlaceId, LocalPlayer) end)
+            task.wait(20)
+            isHopping = false 
+        end
     end)
 end
 
@@ -348,12 +354,14 @@ task.spawn(function()
                 StatusLabel.Text = "Looting! Triggering Webhook..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
+                -- Fire the webhook to your Discord
                 sendDiscordLog(`Successfully collected loot in Server: ||{game.JobId}||`)
                 
                 task.wait(5)
                 performHop()
             else
                 local clockTime = Lighting.ClockTime
+                -- STRICT SPEED CHECK: True Nighttime is between ~17.5 (5:30 PM) and 6.0 (6:00 AM)
                 local isNight = clockTime >= 17.5 or clockTime < 6
                 
                 if not isNight then
