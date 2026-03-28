@@ -43,7 +43,7 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. POP-UP LOOT TRACKER & DISCORD WEBHOOK
+-- 2. DUAL UI SCRAPER (POP-UPS & INVENTORY) & WEBHOOK
 -------------------------------------------------------------------------------
 local sessionGained = 0
 local popupListener = nil
@@ -75,15 +75,46 @@ local function stopLootListener()
     return sessionGained
 end
 
--- We will still try to grab the total just in case, but won't rely on it for the math.
+-- NEW: Scrapes the physical Inventory Menu UI for the Total Stingers
 local function getTotalStingers()
     local count = "?"
+    
+    -- Method A: Try standard data read first (just in case Delta fixes itself)
     pcall(function()
         local cache = require(ReplicatedStorage:WaitForChild("ClientStatCache"))
         local stats = cache:Get()
         local num = tonumber(stats.Stingers) or tonumber(cache:Get("Stingers"))
-        if num and num > 0 then count = tostring(num) end
+        if num and num > 0 then 
+            count = tostring(num) 
+        end
     end)
+    
+    -- Method B: Inventory UI Scraper (If Method A fails or returns nil/0)
+    if count == "?" then
+        pcall(function()
+            local pGui = LocalPlayer:FindFirstChild("PlayerGui")
+            if pGui then
+                -- Dig through all UI elements looking for the Stinger inventory slot
+                for _, element in ipairs(pGui:GetDescendants()) do
+                    if element:IsA("GuiObject") and (element.Name == "Stinger" or element.Name == "Item_Stinger") then
+                        -- Found the slot, now find the text label with the amount inside it
+                        for _, child in ipairs(element:GetDescendants()) do
+                            if child:IsA("TextLabel") then
+                                -- Match numbers like "152" or "x152"
+                                local scrapedNum = string.match(child.Text, "^x?(%d+)$") or string.match(child.Text, "^(%d+)$")
+                                if scrapedNum then
+                                    count = scrapedNum
+                                    break
+                                end
+                            end
+                        end
+                    end
+                    if count ~= "?" then break end
+                end
+            end
+        end)
+    end
+    
     return count
 end
 
@@ -111,7 +142,7 @@ local function sendDiscordLog(gained, total)
                             ["inline"] = true
                         }
                     },
-                    ["footer"] = {["text"] = "Delta Mobile Auto-Hopper • Pop-up UI Scraper"}
+                    ["footer"] = {["text"] = "Delta Auto-Hopper • UI Scraper Active"}
                 }}
             }
             local jsonData = HttpService:JSONEncode(data)
@@ -414,10 +445,11 @@ task.spawn(function()
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
                 -- Wait a few seconds for the text UI to actually appear on the right side
-                task.wait(4)
+                -- and for the inventory menu to fully update its values behind the scenes
+                task.wait(5)
                 
                 local gainedStingers = stopLootListener()
-                local finalTotal = getTotalStingers() -- Might return "?" on Delta, which is fine
+                local finalTotal = getTotalStingers() 
                 
                 sendDiscordLog(gainedStingers, finalTotal)
                 
