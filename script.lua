@@ -43,25 +43,66 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. BULLETPROOF INVENTORY TRACKER & DISCORD WEBHOOK
+-- 2. DIAGNOSTIC INVENTORY TRACKER & DISCORD WEBHOOK
 -------------------------------------------------------------------------------
 local function getStingers()
     local count = 0
-    pcall(function()
+    local debugStatus = "None"
+    
+    local success, err = pcall(function()
+        -- Method A: The standard BSS Code fetch
         local cache = require(ReplicatedStorage:WaitForChild("ClientStatCache"))
-        local stats = cache:Get("Stingers")
         
-        -- If direct fetch fails, grab the whole table as a backup
-        if type(stats) ~= "number" then
-            local allStats = cache:Get()
-            stats = allStats.Stingers or allStats.Stinger or 0
+        -- Try direct fetch first
+        local directFetch = cache:Get("Stingers")
+        if type(directFetch) == "number" then
+            count = directFetch
+            debugStatus = "Success (Direct)"
+            return
         end
-        count = tonumber(stats) or 0
+        
+        -- Try full table scan if direct fails
+        local allStats = cache:Get()
+        if type(allStats) == "table" then
+            for key, value in pairs(allStats) do
+                if tostring(key):lower() == "stingers" or tostring(key):lower() == "stinger" then
+                    count = tonumber(value) or 0
+                    debugStatus = "Success (Table Scan)"
+                    return
+                end
+            end
+        end
+        
+        error("Stingers key completely missing from table.")
     end)
-    return count
+    
+    if not success or count == 0 then
+        -- Method B: UI Scraping (If Delta's 'require' is broken)
+        debugStatus = "Error: " .. tostring(err):sub(1, 40)
+        pcall(function()
+            local pGui = LocalPlayer:FindFirstChild("PlayerGui")
+            if pGui then
+                for _, element in ipairs(pGui:GetDescendants()) do
+                    if element:IsA("TextLabel") and string.find(string.lower(element.Text), "stinger") then
+                        -- Found a UI element mentioning stingers, let's try to pull a number nearby
+                        local possibleAmount = element.Parent:FindFirstChildWhichIsA("TextLabel")
+                        if possibleAmount then
+                            local scrapedNum = tonumber(string.match(possibleAmount.Text, "%d+"))
+                            if scrapedNum and scrapedNum > 0 then
+                                count = scrapedNum
+                                debugStatus = "Success (UI Scraped)"
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+    
+    return count, debugStatus
 end
 
-local function sendDiscordLog(gained, total)
+local function sendDiscordLog(gained, total, debugMsg)
     if WebhookURL == "" or WebhookURL == "YOUR_WEBHOOK_URL_HERE" then return end
     
     task.spawn(function()
@@ -85,7 +126,8 @@ local function sendDiscordLog(gained, total)
                             ["inline"] = true
                         }
                     },
-                    ["footer"] = {["text"] = "Delta Mobile Auto-Hopper • Smart Tracking"}
+                    -- THIS IS THE MAGIC LINE: It will print Delta's error code to Discord!
+                    ["footer"] = {["text"] = `Delta Hopper • Debug: {debugMsg}`}
                 }}
             }
             local jsonData = HttpService:JSONEncode(data)
@@ -167,6 +209,7 @@ local isHopping = false
 local hopCountdown = 10 
 local hopStartTime = 0 
 local initialStingers = 0 
+local startDebugInfo = ""
 
 local blacklistedServers = {} 
 local currentTargetId = nil   
@@ -351,7 +394,7 @@ local function isViciousAlive()
 end
 
 -------------------------------------------------------------------------------
--- 10. MAIN TIMELINE LOOP & STRICT NIGHT CLOCK
+-- 10. MAIN TIMELINE LOOP
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
@@ -369,8 +412,8 @@ task.spawn(function()
 
         if viciousHere then
             if not atlasExecuted then
-                -- Log starting stingers BEFORE Atlas kills it
-                initialStingers = getStingers()
+                -- Log starting stingers and debugging info BEFORE Atlas kills it
+                initialStingers, startDebugInfo = getStingers()
                 
                 StatusLabel.Text = "Vicious Found! Loading Atlas..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
@@ -388,32 +431,31 @@ task.spawn(function()
                 StatusLabel.Text = "Looting! Watching Inventory..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
-                -- SMART WAIT: Watch the backpack for up to 25 seconds
                 local waitTime = 0
-                local finalStingers = getStingers()
+                local finalStingers, endDebugInfo = getStingers()
                 
                 while waitTime < 25 do
-                    finalStingers = getStingers()
+                    finalStingers, endDebugInfo = getStingers()
                     if finalStingers > initialStingers then
-                        -- The moment we see the count go up, wait 3 extra seconds for stragglers
                         task.wait(3)
-                        finalStingers = getStingers()
+                        finalStingers, endDebugInfo = getStingers()
                         break
                     end
                     task.wait(1)
                     waitTime += 1
                 end
                 
-                -- Calculate exact profits
                 local gainedStingers = finalStingers - initialStingers
                 
-                -- Fire the advanced webhook to your Discord
-                sendDiscordLog(gainedStingers, finalStingers)
+                -- Send logs including Delta's hidden error messages
+                local combinedDebug = startDebugInfo
+                if endDebugInfo ~= startDebugInfo then combinedDebug = combinedDebug .. " | End: " .. endDebugInfo end
+                
+                sendDiscordLog(gainedStingers, finalStingers, combinedDebug)
                 
                 performHop()
             else
                 local clockTime = Lighting.ClockTime
-                -- STRICT SPEED CHECK: True Nighttime is between ~17.5 (5:30 PM) and 6.0 (6:00 AM)
                 local isNight = clockTime >= 17.5 or clockTime < 6
                 
                 if not isNight then
