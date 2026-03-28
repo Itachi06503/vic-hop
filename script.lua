@@ -16,7 +16,6 @@ local GuiService = game:GetService("GuiService")
 local CoreGui = game:GetService("CoreGui")
 local VirtualUser = game:GetService("VirtualUser")
 local Lighting = game:GetService("Lighting")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -43,44 +42,33 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. CLEAN DATA TRACKER & DISCORD WEBHOOK
+-- 2. KILL TRACKER & DISCORD WEBHOOK
 -------------------------------------------------------------------------------
-local function getStingers()
-    local count = 0
-    pcall(function()
-        local cache = require(ReplicatedStorage:WaitForChild("ClientStatCache"))
-        -- Try the two most reliable ways to pull BSS stats
-        local stats = cache:Get()
-        count = tonumber(stats.Stingers) or tonumber(cache:Get("Stingers")) or 0
-    end)
-    return count
-end
+local sessionKills = 0
 
-local function sendDiscordLog(gained, total)
+local function sendDiscordLog()
     if WebhookURL == "" or WebhookURL == "YOUR_WEBHOOK_URL_HERE" then return end
     
     task.spawn(function()
         pcall(function()
-            local embedColor = gained > 0 and tonumber("0x00FF00") or tonumber("0xFFA500") 
-            
             local data = {
                 ["embeds"] = {{
                     ["title"] = "🐝 Vicious Bee Defeated!",
-                    ["description"] = `Successfully cleared a server!\n**Server ID:** ||{game.JobId}||`,
-                    ["color"] = embedColor,
+                    ["description"] = `Successfully killed and looted!\n**Server ID:** ||{game.JobId}||`,
+                    ["color"] = tonumber("0x00FF00"),
                     ["fields"] = {
                         {
-                            ["name"] = "🗡️ Stingers Gained",
-                            ["value"] = `+{gained}`,
+                            ["name"] = "⚔️ Session Kills",
+                            ["value"] = tostring(sessionKills),
                             ["inline"] = true
                         },
                         {
-                            ["name"] = "🎒 Total Stingers",
-                            ["value"] = tostring(total),
+                            ["name"] = "🎒 Loot Status",
+                            ["value"] = "Collected via Atlas",
                             ["inline"] = true
                         }
                     },
-                    ["footer"] = {["text"] = "Delta Mobile Auto-Hopper • 12s Sweep Tracker"}
+                    ["footer"] = {["text"] = "Delta Mobile Auto-Hopper • Kill Tracker"}
                 }}
             }
             local jsonData = HttpService:JSONEncode(data)
@@ -107,7 +95,7 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -------------------------------------------------------------------------------
--- 4. MODERN UI CREATION & MEMORY CLEANUP
+-- 4. MODERN UI CREATION
 -------------------------------------------------------------------------------
 pcall(function()
     local hiddenGui = gethui and gethui() or CoreGui
@@ -161,7 +149,6 @@ local atlasExecuted = false
 local isHopping = false
 local hopCountdown = 10 
 local hopStartTime = 0 
-local initialStingers = 0 
 
 local blacklistedServers = {} 
 local currentTargetId = nil   
@@ -364,9 +351,6 @@ task.spawn(function()
 
         if viciousHere then
             if not atlasExecuted then
-                -- Log starting stingers cleanly BEFORE Atlas kills it
-                initialStingers = getStingers()
-                
                 StatusLabel.Text = "Vicious Found! Loading Atlas..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
                 atlasExecuted = true
@@ -386,13 +370,9 @@ task.spawn(function()
                 
                 task.wait(12)
                 
-                local finalStingers = getStingers()
-                local gainedStingers = finalStingers - initialStingers
-                
-                -- Catch negative numbers just in case of weird load issues
-                if gainedStingers < 0 then gainedStingers = 0 end 
-                
-                sendDiscordLog(gainedStingers, finalStingers)
+                -- Update kill count and send clean discord log
+                sessionKills += 1
+                sendDiscordLog()
                 
                 performHop()
             else
