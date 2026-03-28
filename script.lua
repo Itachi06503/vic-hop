@@ -43,66 +43,20 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. DIAGNOSTIC INVENTORY TRACKER & DISCORD WEBHOOK
+-- 2. CLEAN DATA TRACKER & DISCORD WEBHOOK
 -------------------------------------------------------------------------------
 local function getStingers()
     local count = 0
-    local debugStatus = "None"
-    
-    local success, err = pcall(function()
-        -- Method A: The standard BSS Code fetch
+    pcall(function()
         local cache = require(ReplicatedStorage:WaitForChild("ClientStatCache"))
-        
-        -- Try direct fetch first
-        local directFetch = cache:Get("Stingers")
-        if type(directFetch) == "number" then
-            count = directFetch
-            debugStatus = "Success (Direct)"
-            return
-        end
-        
-        -- Try full table scan if direct fails
-        local allStats = cache:Get()
-        if type(allStats) == "table" then
-            for key, value in pairs(allStats) do
-                if tostring(key):lower() == "stingers" or tostring(key):lower() == "stinger" then
-                    count = tonumber(value) or 0
-                    debugStatus = "Success (Table Scan)"
-                    return
-                end
-            end
-        end
-        
-        error("Stingers key completely missing from table.")
+        -- Try the two most reliable ways to pull BSS stats
+        local stats = cache:Get()
+        count = tonumber(stats.Stingers) or tonumber(cache:Get("Stingers")) or 0
     end)
-    
-    if not success or count == 0 then
-        -- Method B: UI Scraping (If Delta's 'require' is broken)
-        debugStatus = "Error: " .. tostring(err):sub(1, 40)
-        pcall(function()
-            local pGui = LocalPlayer:FindFirstChild("PlayerGui")
-            if pGui then
-                for _, element in ipairs(pGui:GetDescendants()) do
-                    if element:IsA("TextLabel") and string.find(string.lower(element.Text), "stinger") then
-                        -- Found a UI element mentioning stingers, let's try to pull a number nearby
-                        local possibleAmount = element.Parent:FindFirstChildWhichIsA("TextLabel")
-                        if possibleAmount then
-                            local scrapedNum = tonumber(string.match(possibleAmount.Text, "%d+"))
-                            if scrapedNum and scrapedNum > 0 then
-                                count = scrapedNum
-                                debugStatus = "Success (UI Scraped)"
-                            end
-                        end
-                    end
-                end
-            end
-        end)
-    end
-    
-    return count, debugStatus
+    return count
 end
 
-local function sendDiscordLog(gained, total, debugMsg)
+local function sendDiscordLog(gained, total)
     if WebhookURL == "" or WebhookURL == "YOUR_WEBHOOK_URL_HERE" then return end
     
     task.spawn(function()
@@ -126,8 +80,7 @@ local function sendDiscordLog(gained, total, debugMsg)
                             ["inline"] = true
                         }
                     },
-                    -- THIS IS THE MAGIC LINE: It will print Delta's error code to Discord!
-                    ["footer"] = {["text"] = `Delta Hopper • Debug: {debugMsg}`}
+                    ["footer"] = {["text"] = "Delta Mobile Auto-Hopper • 12s Sweep Tracker"}
                 }}
             }
             local jsonData = HttpService:JSONEncode(data)
@@ -209,7 +162,6 @@ local isHopping = false
 local hopCountdown = 10 
 local hopStartTime = 0 
 local initialStingers = 0 
-local startDebugInfo = ""
 
 local blacklistedServers = {} 
 local currentTargetId = nil   
@@ -412,8 +364,8 @@ task.spawn(function()
 
         if viciousHere then
             if not atlasExecuted then
-                -- Log starting stingers and debugging info BEFORE Atlas kills it
-                initialStingers, startDebugInfo = getStingers()
+                -- Log starting stingers cleanly BEFORE Atlas kills it
+                initialStingers = getStingers()
                 
                 StatusLabel.Text = "Vicious Found! Loading Atlas..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
@@ -428,30 +380,19 @@ task.spawn(function()
             end
         else
             if atlasExecuted then
-                StatusLabel.Text = "Looting! Watching Inventory..."
+                -- The bee is dead! Give Atlas a guaranteed 12 seconds to collect tokens.
+                StatusLabel.Text = "Looting! Waiting 12s for Atlas..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
-                local waitTime = 0
-                local finalStingers, endDebugInfo = getStingers()
+                task.wait(12)
                 
-                while waitTime < 25 do
-                    finalStingers, endDebugInfo = getStingers()
-                    if finalStingers > initialStingers then
-                        task.wait(3)
-                        finalStingers, endDebugInfo = getStingers()
-                        break
-                    end
-                    task.wait(1)
-                    waitTime += 1
-                end
-                
+                local finalStingers = getStingers()
                 local gainedStingers = finalStingers - initialStingers
                 
-                -- Send logs including Delta's hidden error messages
-                local combinedDebug = startDebugInfo
-                if endDebugInfo ~= startDebugInfo then combinedDebug = combinedDebug .. " | End: " .. endDebugInfo end
+                -- Catch negative numbers just in case of weird load issues
+                if gainedStingers < 0 then gainedStingers = 0 end 
                 
-                sendDiscordLog(gainedStingers, finalStingers, combinedDebug)
+                sendDiscordLog(gainedStingers, finalStingers)
                 
                 performHop()
             else
