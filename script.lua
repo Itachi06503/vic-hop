@@ -22,7 +22,7 @@ local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 
 -------------------------------------------------------------------------------
--- 1. INSTANT MOBILE FPS BOOSTER (LOAD 3X FASTER)
+-- 1. INSTANT MOBILE FPS BOOSTER
 -------------------------------------------------------------------------------
 task.spawn(function()
     pcall(function()
@@ -45,17 +45,18 @@ end)
 -------------------------------------------------------------------------------
 -- 2. BULLETPROOF INVENTORY TRACKER & DISCORD WEBHOOK
 -------------------------------------------------------------------------------
--- Safely fetches your exact Stinger count from the game's data table
 local function getStingers()
     local count = 0
     pcall(function()
         local cache = require(ReplicatedStorage:WaitForChild("ClientStatCache"))
-        local stats = cache:Get()
+        local stats = cache:Get("Stingers")
         
-        -- BSS returns a massive table of all your stats. We search it for Stingers.
-        if type(stats) == "table" then
-            count = tonumber(stats.Stingers) or tonumber(stats.stingers) or 0
+        -- If direct fetch fails, grab the whole table as a backup
+        if type(stats) ~= "number" then
+            local allStats = cache:Get()
+            stats = allStats.Stingers or allStats.Stinger or 0
         end
+        count = tonumber(stats) or 0
     end)
     return count
 end
@@ -159,7 +160,7 @@ StatusLabel.TextWrapped = true
 StatusLabel.Parent = MainFrame
 
 -------------------------------------------------------------------------------
--- 5. STATE VARIABLES & BLACKLIST
+-- 5. STATE VARIABLES
 -------------------------------------------------------------------------------
 local atlasExecuted = false
 local isHopping = false
@@ -173,7 +174,7 @@ local failedAttempts = 0
 local lastFailTime = 0 
 
 -------------------------------------------------------------------------------
--- 6. SAFER TELEPORT LOGIC (WITH HARD COOLDOWNS)
+-- 6. SAFER TELEPORT LOGIC
 -------------------------------------------------------------------------------
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
     if player == LocalPlayer then
@@ -216,7 +217,7 @@ local function executeTeleport(targetId, pCountLabel)
 end
 
 -------------------------------------------------------------------------------
--- 7. THE PATIENT SERVER SCANNER (GHOST-PROOF)
+-- 7. THE PATIENT SERVER SCANNER
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -384,14 +385,26 @@ task.spawn(function()
             end
         else
             if atlasExecuted then
-                StatusLabel.Text = "Looting! Triggering Webhook..."
+                StatusLabel.Text = "Looting! Watching Inventory..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
-                -- Increased from 7s to 10s to guarantee Atlas collects the Stinger tokens
-                task.wait(10)
+                -- SMART WAIT: Watch the backpack for up to 25 seconds
+                local waitTime = 0
+                local finalStingers = getStingers()
+                
+                while waitTime < 25 do
+                    finalStingers = getStingers()
+                    if finalStingers > initialStingers then
+                        -- The moment we see the count go up, wait 3 extra seconds for stragglers
+                        task.wait(3)
+                        finalStingers = getStingers()
+                        break
+                    end
+                    task.wait(1)
+                    waitTime += 1
+                end
                 
                 -- Calculate exact profits
-                local finalStingers = getStingers()
                 local gainedStingers = finalStingers - initialStingers
                 
                 -- Fire the advanced webhook to your Discord
