@@ -43,15 +43,21 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. LIVE INVENTORY TRACKER & DISCORD WEBHOOK
+-- 2. BULLETPROOF INVENTORY TRACKER & DISCORD WEBHOOK
 -------------------------------------------------------------------------------
--- Safely fetches your exact Stinger count from the game's code
+-- Safely fetches your exact Stinger count from the game's data table
 local function getStingers()
-    local success, result = pcall(function()
-        local statCache = require(ReplicatedStorage:WaitForChild("ClientStatCache"))
-        return statCache:Get("Stingers")
+    local count = 0
+    pcall(function()
+        local cache = require(ReplicatedStorage:WaitForChild("ClientStatCache"))
+        local stats = cache:Get()
+        
+        -- BSS returns a massive table of all your stats. We search it for Stingers.
+        if type(stats) == "table" then
+            count = tonumber(stats.Stingers) or tonumber(stats.stingers) or 0
+        end
     end)
-    return (success and type(result) == "number") and result or 0
+    return count
 end
 
 local function sendDiscordLog(gained, total)
@@ -59,7 +65,7 @@ local function sendDiscordLog(gained, total)
     
     task.spawn(function()
         pcall(function()
-            local embedColor = gained > 0 and tonumber("0x00FF00") or tonumber("0xFFA500") -- Green if got stingers, Orange if 0
+            local embedColor = gained > 0 and tonumber("0x00FF00") or tonumber("0xFFA500") 
             
             local data = {
                 ["embeds"] = {{
@@ -159,7 +165,7 @@ local atlasExecuted = false
 local isHopping = false
 local hopCountdown = 10 
 local hopStartTime = 0 
-local initialStingers = 0 -- To track stats
+local initialStingers = 0 
 
 local blacklistedServers = {} 
 local currentTargetId = nil   
@@ -381,8 +387,8 @@ task.spawn(function()
                 StatusLabel.Text = "Looting! Triggering Webhook..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
-                -- Wait 7 seconds to absolutely guarantee Atlas collects the Stinger tokens
-                task.wait(7)
+                -- Increased from 7s to 10s to guarantee Atlas collects the Stinger tokens
+                task.wait(10)
                 
                 -- Calculate exact profits
                 local finalStingers = getStingers()
