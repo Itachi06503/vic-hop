@@ -16,7 +16,6 @@ local GuiService = game:GetService("GuiService")
 local CoreGui = game:GetService("CoreGui")
 local VirtualUser = game:GetService("VirtualUser")
 local Lighting = game:GetService("Lighting")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -43,10 +42,29 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. DUAL UI SCRAPER (POP-UPS & INVENTORY) & WEBHOOK
+-- 2. DEVICE FILE SAVING & LOOT TRACKER
 -------------------------------------------------------------------------------
 local sessionGained = 0
 local popupListener = nil
+local SaveFileName = "ViciousSessionTotal.txt"
+local sessionTotalFarmed = 0
+
+-- Load saved session data from your device
+pcall(function()
+    if isfile and isfile(SaveFileName) then
+        sessionTotalFarmed = tonumber(readfile(SaveFileName)) or 0
+    end
+end)
+
+-- Save new data to your device
+local function updateSessionFile(addedAmount)
+    sessionTotalFarmed = sessionTotalFarmed + addedAmount
+    pcall(function()
+        if writefile then
+            writefile(SaveFileName, tostring(sessionTotalFarmed))
+        end
+    end)
+end
 
 local function startLootListener()
     sessionGained = 0
@@ -54,7 +72,6 @@ local function startLootListener()
     
     popupListener = LocalPlayer:WaitForChild("PlayerGui").DescendantAdded:Connect(function(desc)
         if desc:IsA("TextLabel") then
-            -- Wait a split second for BSS to fill in the text
             task.delay(0.2, function()
                 pcall(function()
                     local text = string.lower(desc.Text)
@@ -75,50 +92,7 @@ local function stopLootListener()
     return sessionGained
 end
 
--- NEW: Scrapes the physical Inventory Menu UI for the Total Stingers
-local function getTotalStingers()
-    local count = "?"
-    
-    -- Method A: Try standard data read first (just in case Delta fixes itself)
-    pcall(function()
-        local cache = require(ReplicatedStorage:WaitForChild("ClientStatCache"))
-        local stats = cache:Get()
-        local num = tonumber(stats.Stingers) or tonumber(cache:Get("Stingers"))
-        if num and num > 0 then 
-            count = tostring(num) 
-        end
-    end)
-    
-    -- Method B: Inventory UI Scraper (If Method A fails or returns nil/0)
-    if count == "?" then
-        pcall(function()
-            local pGui = LocalPlayer:FindFirstChild("PlayerGui")
-            if pGui then
-                -- Dig through all UI elements looking for the Stinger inventory slot
-                for _, element in ipairs(pGui:GetDescendants()) do
-                    if element:IsA("GuiObject") and (element.Name == "Stinger" or element.Name == "Item_Stinger") then
-                        -- Found the slot, now find the text label with the amount inside it
-                        for _, child in ipairs(element:GetDescendants()) do
-                            if child:IsA("TextLabel") then
-                                -- Match numbers like "152" or "x152"
-                                local scrapedNum = string.match(child.Text, "^x?(%d+)$") or string.match(child.Text, "^(%d+)$")
-                                if scrapedNum then
-                                    count = scrapedNum
-                                    break
-                                end
-                            end
-                        end
-                    end
-                    if count ~= "?" then break end
-                end
-            end
-        end)
-    end
-    
-    return count
-end
-
-local function sendDiscordLog(gained, total)
+local function sendDiscordLog(gained, sessionTotal)
     if WebhookURL == "" or WebhookURL == "YOUR_WEBHOOK_URL_HERE" then return end
     
     task.spawn(function()
@@ -137,12 +111,12 @@ local function sendDiscordLog(gained, total)
                             ["inline"] = true
                         },
                         {
-                            ["name"] = "🎒 Total Stingers",
-                            ["value"] = tostring(total),
+                            ["name"] = "📈 Session Farmed",
+                            ["value"] = tostring(sessionTotal),
                             ["inline"] = true
                         }
                     },
-                    ["footer"] = {["text"] = "Delta Auto-Hopper • UI Scraper Active"}
+                    ["footer"] = {["text"] = "Delta Auto-Hopper • Persistent Storage"}
                 }}
             }
             local jsonData = HttpService:JSONEncode(data)
@@ -169,7 +143,7 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -------------------------------------------------------------------------------
--- 4. MODERN UI CREATION
+-- 4. MODERN UI CREATION (WITH RESET BUTTON)
 -------------------------------------------------------------------------------
 pcall(function()
     local hiddenGui = gethui and gethui() or CoreGui
@@ -195,7 +169,7 @@ end
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 240, 0, 40)
+MainFrame.Size = UDim2.new(0, 240, 0, 70) 
 MainFrame.Position = UDim2.new(0.5, -120, 0, 20) 
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BackgroundTransparency = 0.3
@@ -207,7 +181,7 @@ MainFrame.Parent = ScreenGui
 
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Name = "StatusLabel"
-StatusLabel.Size = UDim2.new(1, 0, 1, 0)
+StatusLabel.Size = UDim2.new(1, 0, 0, 40)
 StatusLabel.BackgroundTransparency = 1
 StatusLabel.Text = "Initializing Booster..."
 StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -215,6 +189,28 @@ StatusLabel.Font = Enum.Font.Code
 StatusLabel.TextSize = 14
 StatusLabel.TextWrapped = true
 StatusLabel.Parent = MainFrame
+
+local ResetBtn = Instance.new("TextButton")
+ResetBtn.Name = "ResetBtn"
+ResetBtn.Size = UDim2.new(1, 0, 0, 30)
+ResetBtn.Position = UDim2.new(0, 0, 0, 40)
+ResetBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+ResetBtn.BackgroundTransparency = 0.3
+ResetBtn.BorderSizePixel = 1
+ResetBtn.BorderColor3 = Color3.fromRGB(80, 80, 80)
+ResetBtn.Text = `Reset Session (Currently: {sessionTotalFarmed})`
+ResetBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
+ResetBtn.Font = Enum.Font.Code
+ResetBtn.TextSize = 14
+ResetBtn.Parent = MainFrame
+
+ResetBtn.MouseButton1Click:Connect(function()
+    sessionTotalFarmed = 0
+    pcall(function() if writefile then writefile(SaveFileName, "0") end end)
+    ResetBtn.Text = "Reset Session (Currently: 0)"
+    StatusLabel.Text = "Session tracker reset!"
+    StatusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+end)
 
 -------------------------------------------------------------------------------
 -- 5. STATE VARIABLES
@@ -428,7 +424,6 @@ task.spawn(function()
                 StatusLabel.Text = "Vicious Found! Tracking Screen..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
                 
-                -- Start listening for the UI popups!
                 startLootListener()
                 atlasExecuted = true
                 
@@ -444,14 +439,17 @@ task.spawn(function()
                 StatusLabel.Text = "Bee dead! Waiting for popup..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
-                -- Wait a few seconds for the text UI to actually appear on the right side
-                -- and for the inventory menu to fully update its values behind the scenes
                 task.wait(5)
                 
                 local gainedStingers = stopLootListener()
-                local finalTotal = getTotalStingers() 
                 
-                sendDiscordLog(gainedStingers, finalTotal)
+                -- Save the new total to the device file!
+                updateSessionFile(gainedStingers)
+                
+                -- Update the UI button to show the current saved total
+                ResetBtn.Text = `Reset Session (Currently: {sessionTotalFarmed})`
+                
+                sendDiscordLog(gainedStingers, sessionTotalFarmed)
                 
                 performHop()
             else
