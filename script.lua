@@ -16,6 +16,7 @@ local GuiService = game:GetService("GuiService")
 local CoreGui = game:GetService("CoreGui")
 local VirtualUser = game:GetService("VirtualUser")
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -42,33 +43,75 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. KILL TRACKER & DISCORD WEBHOOK
+-- 2. POP-UP LOOT TRACKER & DISCORD WEBHOOK
 -------------------------------------------------------------------------------
-local sessionKills = 0
+local sessionGained = 0
+local popupListener = nil
 
-local function sendDiscordLog()
+local function startLootListener()
+    sessionGained = 0
+    if popupListener then popupListener:Disconnect() end
+    
+    popupListener = LocalPlayer:WaitForChild("PlayerGui").DescendantAdded:Connect(function(desc)
+        if desc:IsA("TextLabel") then
+            -- Wait a split second for BSS to fill in the text
+            task.delay(0.2, function()
+                pcall(function()
+                    local text = string.lower(desc.Text)
+                    if string.find(text, "stinger") then
+                        local amount = tonumber(string.match(text, "%d+"))
+                        if amount then
+                            sessionGained = sessionGained + amount
+                        end
+                    end
+                end)
+            end)
+        end
+    end)
+end
+
+local function stopLootListener()
+    if popupListener then popupListener:Disconnect() end
+    return sessionGained
+end
+
+-- We will still try to grab the total just in case, but won't rely on it for the math.
+local function getTotalStingers()
+    local count = "?"
+    pcall(function()
+        local cache = require(ReplicatedStorage:WaitForChild("ClientStatCache"))
+        local stats = cache:Get()
+        local num = tonumber(stats.Stingers) or tonumber(cache:Get("Stingers"))
+        if num and num > 0 then count = tostring(num) end
+    end)
+    return count
+end
+
+local function sendDiscordLog(gained, total)
     if WebhookURL == "" or WebhookURL == "YOUR_WEBHOOK_URL_HERE" then return end
     
     task.spawn(function()
         pcall(function()
+            local embedColor = gained > 0 and tonumber("0x00FF00") or tonumber("0xFFA500") 
+            
             local data = {
                 ["embeds"] = {{
                     ["title"] = "🐝 Vicious Bee Defeated!",
-                    ["description"] = `Successfully killed and looted!\n**Server ID:** ||{game.JobId}||`,
-                    ["color"] = tonumber("0x00FF00"),
+                    ["description"] = `Successfully cleared a server!\n**Server ID:** ||{game.JobId}||`,
+                    ["color"] = embedColor,
                     ["fields"] = {
                         {
-                            ["name"] = "⚔️ Session Kills",
-                            ["value"] = tostring(sessionKills),
+                            ["name"] = "🗡️ Stingers Gained",
+                            ["value"] = `+{gained}`,
                             ["inline"] = true
                         },
                         {
-                            ["name"] = "🎒 Loot Status",
-                            ["value"] = "Collected via Atlas",
+                            ["name"] = "🎒 Total Stingers",
+                            ["value"] = tostring(total),
                             ["inline"] = true
                         }
                     },
-                    ["footer"] = {["text"] = "Delta Mobile Auto-Hopper • Kill Tracker"}
+                    ["footer"] = {["text"] = "Delta Mobile Auto-Hopper • Pop-up UI Scraper"}
                 }}
             }
             local jsonData = HttpService:JSONEncode(data)
@@ -351,8 +394,11 @@ task.spawn(function()
 
         if viciousHere then
             if not atlasExecuted then
-                StatusLabel.Text = "Vicious Found! Loading Atlas..."
+                StatusLabel.Text = "Vicious Found! Tracking Screen..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+                
+                -- Start listening for the UI popups!
+                startLootListener()
                 atlasExecuted = true
                 
                 pcall(function()
@@ -364,15 +410,16 @@ task.spawn(function()
             end
         else
             if atlasExecuted then
-                -- The bee is dead! Give Atlas a guaranteed 12 seconds to collect tokens.
-                StatusLabel.Text = "Looting! Waiting 12s for Atlas..."
+                StatusLabel.Text = "Bee dead! Waiting for popup..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
-                task.wait(12)
+                -- Wait a few seconds for the text UI to actually appear on the right side
+                task.wait(4)
                 
-                -- Update kill count and send clean discord log
-                sessionKills += 1
-                sendDiscordLog()
+                local gainedStingers = stopLootListener()
+                local finalTotal = getTotalStingers() -- Might return "?" on Delta, which is fine
+                
+                sendDiscordLog(gainedStingers, finalTotal)
                 
                 performHop()
             else
