@@ -7,18 +7,45 @@ local WebhookURL = "https://discord.com/api/webhooks/1487070973827219538/80wfTSK
 if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(5) 
 
--- Service Variables
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local GuiService = game:GetService("GuiService")
-local CoreGui = game:GetService("CoreGui")
-local VirtualUser = game:GetService("VirtualUser")
-local Lighting = game:GetService("Lighting")
+-- ==============================================================================
+-- 🛡️ SECURITY & STEALTH MODULE
+-- ==============================================================================
+local function GetSafeService(serviceName)
+    local service = game:GetService(serviceName)
+    if cloneref then
+        return cloneref(service)
+    end
+    return service
+end
+
+local function GenerateRandomString(length)
+    local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    local result = ""
+    for i = 1, length do
+        local rand = math.random(1, #chars)
+        result = result .. string.sub(chars, rand, rand)
+    end
+    return result
+end
+
+-- Service Variables (Using Safe References)
+local TeleportService = GetSafeService("TeleportService")
+local HttpService     = GetSafeService("HttpService")
+local Players         = GetSafeService("Players")
+local Workspace       = GetSafeService("Workspace")
+local GuiService      = GetSafeService("GuiService")
+local CoreGui         = GetSafeService("CoreGui")
+local VirtualUser     = GetSafeService("VirtualUser")
+local Lighting        = GetSafeService("Lighting")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
+
+-- Randomized UI Names for Anti-Detection
+local GUI_NAME = GenerateRandomString(12)
+local FRAME_NAME = GenerateRandomString(10)
+local STATUS_NAME = GenerateRandomString(10)
+local BTN_NAME = GenerateRandomString(10)
 
 -------------------------------------------------------------------------------
 -- 1. INSTANT MOBILE FPS BOOSTER
@@ -49,14 +76,12 @@ local popupListener = nil
 local SaveFileName = "ViciousSessionTotal.txt"
 local sessionTotalFarmed = 0
 
--- Load saved session data from your device
 pcall(function()
     if isfile and isfile(SaveFileName) then
         sessionTotalFarmed = tonumber(readfile(SaveFileName)) or 0
     end
 end)
 
--- Save new data to your device
 local function updateSessionFile(addedAmount)
     sessionTotalFarmed = sessionTotalFarmed + addedAmount
     pcall(function()
@@ -116,7 +141,7 @@ local function sendDiscordLog(gained, sessionTotal)
                             ["inline"] = true
                         }
                     },
-                    ["footer"] = {["text"] = "Delta Auto-Hopper • Persistent Storage"}
+                    ["footer"] = {["text"] = "Delta Auto-Hopper • Stealth Mode"}
                 }}
             }
             local jsonData = HttpService:JSONEncode(data)
@@ -143,23 +168,24 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -------------------------------------------------------------------------------
--- 4. MODERN UI CREATION (WITH RESET BUTTON)
+-- 4. OBFUSCATED UI CREATION (WITH RESET BUTTON)
 -------------------------------------------------------------------------------
 pcall(function()
     local hiddenGui = gethui and gethui() or CoreGui
+    -- Clean up old potentially detected names just in case
     for _, v in ipairs(hiddenGui:GetChildren()) do 
-        if v.Name == "VicDetectorUI" then v:Destroy() end 
+        if v.Name == "VicDetectorUI" or string.len(v.Name) == 12 then v:Destroy() end 
     end
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if playerGui then
         for _, v in ipairs(playerGui:GetChildren()) do 
-            if v.Name == "VicDetectorUI" then v:Destroy() end 
+            if v.Name == "VicDetectorUI" or string.len(v.Name) == 12 then v:Destroy() end 
         end
     end
 end)
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "VicDetectorUI"
+ScreenGui.Name = GUI_NAME
 ScreenGui.ResetOnSpawn = false
 
 local successMount = pcall(function() ScreenGui.Parent = gethui() end)
@@ -168,7 +194,7 @@ if not successMount or not ScreenGui.Parent then
 end
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
+MainFrame.Name = FRAME_NAME
 MainFrame.Size = UDim2.new(0, 240, 0, 70) 
 MainFrame.Position = UDim2.new(0.5, -120, 0, 20) 
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
@@ -180,10 +206,10 @@ MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 
 local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Name = "StatusLabel"
+StatusLabel.Name = STATUS_NAME
 StatusLabel.Size = UDim2.new(1, 0, 0, 40)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Initializing Booster..."
+StatusLabel.Text = "Initializing Stealth..."
 StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLabel.Font = Enum.Font.Code
 StatusLabel.TextSize = 14
@@ -191,7 +217,7 @@ StatusLabel.TextWrapped = true
 StatusLabel.Parent = MainFrame
 
 local ResetBtn = Instance.new("TextButton")
-ResetBtn.Name = "ResetBtn"
+ResetBtn.Name = BTN_NAME
 ResetBtn.Size = UDim2.new(1, 0, 0, 30)
 ResetBtn.Position = UDim2.new(0, 0, 0, 40)
 ResetBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
@@ -443,10 +469,8 @@ task.spawn(function()
                 
                 local gainedStingers = stopLootListener()
                 
-                -- Save the new total to the device file!
                 updateSessionFile(gainedStingers)
                 
-                -- Update the UI button to show the current saved total
                 ResetBtn.Text = `Reset Session (Currently: {sessionTotalFarmed})`
                 
                 sendDiscordLog(gainedStingers, sessionTotalFarmed)
