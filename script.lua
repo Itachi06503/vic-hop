@@ -1,5 +1,5 @@
 -- ==============================================================================
--- 🐝 BSS VICIOUS FARMER | APRIL 2026 SECURITY & STABILITY PATCH
+-- 🐝 BSS VICIOUS FARMER | ERROR 279 PATCH (GHOST SERVER EVASION)
 -- ==============================================================================
 local WebhookURL = "https://discord.com/api/webhooks/1487070973827219538/80wfTSKpFD4tYONg7oG4y6uqO3ayAdXrbwwIf6WjUySN7VaH5EDH110lWcfMThZBrCW9"
 
@@ -15,7 +15,6 @@ local function GetSafeService(serviceName)
     return service
 end
 
--- Intercept and block the game from reading executor error logs
 pcall(function()
     if hookmetamethod and getnamecallmethod and checkcaller then
         local oldNamecall
@@ -23,7 +22,7 @@ pcall(function()
             local method = getnamecallmethod()
             if not checkcaller() then
                 if method == "GetLogHistory" or method == "GetMessage" then
-                    return {} -- Feed the game fake/empty logs
+                    return {} 
                 end
             end
             return oldNamecall(self, ...)
@@ -178,7 +177,6 @@ end
 -------------------------------------------------------------------------------
 -- 💤 4. GARBAGE-COLLECTED ANTI-AFK
 -------------------------------------------------------------------------------
--- Prevents memory leak by ensuring only one connection exists
 if getgenv().AntiAfkConnection then getgenv().AntiAfkConnection:Disconnect() end
 
 getgenv().AntiAfkConnection = LocalPlayer.Idled:Connect(function()
@@ -263,7 +261,6 @@ local currentTargetId = nil
 local failedAttempts = 0 
 local lastFailTime = 0 
 
--- Fixes the BSS glitch where you spawn under the map
 local function checkAntiStuck()
     pcall(function()
         local char = LocalPlayer.Character
@@ -272,7 +269,7 @@ local function checkAntiStuck()
                 StatusLabel.Text = "Stuck in void! Resetting..."
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
                 char:BreakJoints()
-                task.wait(6) -- Wait for respawn
+                task.wait(6) 
             end
         end
     end)
@@ -324,7 +321,7 @@ local function executeTeleport(targetId, pCountLabel)
 end
 
 -------------------------------------------------------------------------------
--- 🔍 8. THE PATIENT SERVER SCANNER
+-- 🔍 8. THE GHOST-EVADING SERVER SCANNER
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -332,7 +329,7 @@ local function performHop()
     hopStartTime = os.time() 
     
     if failedAttempts >= 3 then
-        StatusLabel.Text = "Loop Detected! Forcing Random Hop..."
+        StatusLabel.Text = "Loop Detected! Random Hop..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         failedAttempts = 0 
         
@@ -369,8 +366,9 @@ local function performHop()
                 rateLimitRetries = 0 
                 
                 for _, srv in ipairs(result.data) do
-                    if srv.id ~= game.JobId and not blacklistedServers[srv.id] and type(srv.ping) == "number" then
-                        if srv.playing >= 2 and srv.playing <= 5 then
+                    -- Filter out servers with crazy high ping (likely dead)
+                    if srv.id ~= game.JobId and not blacklistedServers[srv.id] and type(srv.ping) == "number" and srv.ping < 500 then
+                        if srv.playing >= 2 and srv.playing <= 6 then
                             table.insert(validServers, srv)
                         elseif srv.playing == 1 then
                             table.insert(fallbackServers, srv)
@@ -380,7 +378,12 @@ local function performHop()
                 
                 if #validServers > 0 then
                     table.sort(validServers, function(a, b) return a.playing < b.playing end)
-                    local bestTarget = validServers[1]
+                    
+                    -- GHOST EVASION: Pick a random server from the top 5 instead of the absolute lowest
+                    -- This prevents the script from constantly hitting the exact same dead "1-player" server
+                    local selectionRange = math.min(#validServers, 5)
+                    local bestTarget = validServers[math.random(1, selectionRange)]
+                    
                     executeTeleport(bestTarget.id, `{bestTarget.playing} players`)
                     return 
                 end
@@ -417,7 +420,7 @@ local function performHop()
 end
 
 -------------------------------------------------------------------------------
--- 🔨 9. HARD-RECONNECT ERROR CRUSHER
+-- 🔨 9. ERROR 279 CRUSHER & RECONNECT HANDLER
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
@@ -428,11 +431,28 @@ task.spawn(function()
                 if overlay then
                     local errorPrompt = overlay:FindFirstChild("ErrorPrompt")
                     if errorPrompt and errorPrompt.Visible then
+                        
+                        -- Check specifically if it's a 279 error
+                        local is279 = false
+                        pcall(function()
+                            local msg = errorPrompt.MessageArea.ErrorFrame.ErrorMessage.Text
+                            if string.find(msg, "279") then is279 = true end
+                        end)
+
                         GuiService:ClearError() 
-                        StatusLabel.Text = "DISCONNECTED! Forcing reconnect..."
-                        StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+                        
+                        if is279 then
+                            StatusLabel.Text = "ERROR 279 DETECTED! Waiting 10s..."
+                            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+                            task.wait(10) -- Give network time to clear ghost connection
+                        else
+                            StatusLabel.Text = "DISCONNECTED! Forcing reconnect..."
+                            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+                        end
+                        
+                        -- Teleport to a totally fresh random server
                         TeleportService:Teleport(PlaceId, LocalPlayer)
-                        task.wait(10)
+                        task.wait(15)
                     end
                 end
             end
@@ -472,7 +492,7 @@ task.spawn(function()
             continue 
         end 
         
-        checkAntiStuck() -- Ensures you aren't stuck under the map!
+        checkAntiStuck() 
         
         local viciousHere = isViciousAlive()
 
