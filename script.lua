@@ -1,22 +1,35 @@
 -- ==============================================================================
--- ⚙️ USER SETTINGS (WEBHOOK CONFIGURED)
+-- 🐝 BSS VICIOUS FARMER | APRIL 2026 SECURITY & STABILITY PATCH
 -- ==============================================================================
 local WebhookURL = "https://discord.com/api/webhooks/1487070973827219538/80wfTSKpFD4tYONg7oG4y6uqO3ayAdXrbwwIf6WjUySN7VaH5EDH110lWcfMThZBrCW9"
 
--- Wait for the game to fully load
 if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(5) 
 
 -- ==============================================================================
--- 🛡️ SECURITY & STEALTH MODULE
+-- 🛡️ 1. ADVANCED SECURITY MODULE (TELEMETRY BLOCKER & CLONEREF)
 -- ==============================================================================
 local function GetSafeService(serviceName)
     local service = game:GetService(serviceName)
-    if cloneref then
-        return cloneref(service)
-    end
+    if cloneref then return cloneref(service) end
     return service
 end
+
+-- Intercept and block the game from reading executor error logs
+pcall(function()
+    if hookmetamethod and getnamecallmethod and checkcaller then
+        local oldNamecall
+        oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+            local method = getnamecallmethod()
+            if not checkcaller() then
+                if method == "GetLogHistory" or method == "GetMessage" then
+                    return {} -- Feed the game fake/empty logs
+                end
+            end
+            return oldNamecall(self, ...)
+        end)
+    end
+end)
 
 local function GenerateRandomString(length)
     local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -28,7 +41,7 @@ local function GenerateRandomString(length)
     return result
 end
 
--- Service Variables (Using Safe References)
+-- Safe Services
 local TeleportService = GetSafeService("TeleportService")
 local HttpService     = GetSafeService("HttpService")
 local Players         = GetSafeService("Players")
@@ -41,14 +54,11 @@ local Lighting        = GetSafeService("Lighting")
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 
--- Randomized UI Names for Anti-Detection
-local GUI_NAME = GenerateRandomString(12)
-local FRAME_NAME = GenerateRandomString(10)
-local STATUS_NAME = GenerateRandomString(10)
-local BTN_NAME = GenerateRandomString(10)
+local GUI_NAME = GenerateRandomString(14)
+local FRAME_NAME = GenerateRandomString(12)
 
 -------------------------------------------------------------------------------
--- 1. INSTANT MOBILE FPS BOOSTER
+-- ⚙️ 2. INSTANT MOBILE FPS BOOSTER
 -------------------------------------------------------------------------------
 task.spawn(function()
     pcall(function()
@@ -69,11 +79,11 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 2. DEVICE FILE SAVING & LOOT TRACKER
+-- 💾 3. DEVICE FILE SAVING & LOOT TRACKER
 -------------------------------------------------------------------------------
 local sessionGained = 0
 local popupListener = nil
-local SaveFileName = "ViciousSessionTotal.txt"
+local SaveFileName = "ViciousSessionTotal_Secured.txt"
 local sessionTotalFarmed = 0
 
 pcall(function()
@@ -93,9 +103,12 @@ end
 
 local function startLootListener()
     sessionGained = 0
-    if popupListener then popupListener:Disconnect() end
+    if popupListener then popupListener:Disconnect(); popupListener = nil end
     
-    popupListener = LocalPlayer:WaitForChild("PlayerGui").DescendantAdded:Connect(function(desc)
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui", 5)
+    if not playerGui then return end
+
+    popupListener = playerGui.DescendantAdded:Connect(function(desc)
         if desc:IsA("TextLabel") then
             task.delay(0.2, function()
                 pcall(function()
@@ -113,7 +126,10 @@ local function startLootListener()
 end
 
 local function stopLootListener()
-    if popupListener then popupListener:Disconnect() end
+    if popupListener then 
+        popupListener:Disconnect()
+        popupListener = nil 
+    end
     return sessionGained
 end
 
@@ -141,7 +157,7 @@ local function sendDiscordLog(gained, sessionTotal)
                             ["inline"] = true
                         }
                     },
-                    ["footer"] = {["text"] = "Delta Auto-Hopper • Stealth Mode"}
+                    ["footer"] = {["text"] = "Delta Auto-Hopper • Stealth Version"}
                 }}
             }
             local jsonData = HttpService:JSONEncode(data)
@@ -160,27 +176,25 @@ local function sendDiscordLog(gained, sessionTotal)
 end
 
 -------------------------------------------------------------------------------
--- 3. OVERNIGHT ANTI-AFK
+-- 💤 4. GARBAGE-COLLECTED ANTI-AFK
 -------------------------------------------------------------------------------
-LocalPlayer.Idled:Connect(function()
+-- Prevents memory leak by ensuring only one connection exists
+if getgenv().AntiAfkConnection then getgenv().AntiAfkConnection:Disconnect() end
+
+getgenv().AntiAfkConnection = LocalPlayer.Idled:Connect(function()
     VirtualUser:CaptureController()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
 -------------------------------------------------------------------------------
--- 4. OBFUSCATED UI CREATION (WITH RESET BUTTON)
+-- 🖥️ 5. OBFUSCATED UI CREATION 
 -------------------------------------------------------------------------------
 pcall(function()
     local hiddenGui = gethui and gethui() or CoreGui
-    -- Clean up old potentially detected names just in case
     for _, v in ipairs(hiddenGui:GetChildren()) do 
-        if v.Name == "VicDetectorUI" or string.len(v.Name) == 12 then v:Destroy() end 
-    end
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if playerGui then
-        for _, v in ipairs(playerGui:GetChildren()) do 
-            if v.Name == "VicDetectorUI" or string.len(v.Name) == 12 then v:Destroy() end 
-        end
+        if v:IsA("ScreenGui") and v:FindFirstChildOfClass("Frame") and v.Frame.Size.Y.Offset == 70 then 
+            v:Destroy() 
+        end 
     end
 end)
 
@@ -197,19 +211,18 @@ local MainFrame = Instance.new("Frame")
 MainFrame.Name = FRAME_NAME
 MainFrame.Size = UDim2.new(0, 240, 0, 70) 
 MainFrame.Position = UDim2.new(0.5, -120, 0, 20) 
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-MainFrame.BackgroundTransparency = 0.3
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+MainFrame.BackgroundTransparency = 0.2
 MainFrame.BorderSizePixel = 2
-MainFrame.BorderColor3 = Color3.fromRGB(60, 60, 60)
+MainFrame.BorderColor3 = Color3.fromRGB(50, 50, 50)
 MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 
 local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Name = STATUS_NAME
 StatusLabel.Size = UDim2.new(1, 0, 0, 40)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Initializing Stealth..."
+StatusLabel.Text = "Initializing Stealth UI..."
 StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLabel.Font = Enum.Font.Code
 StatusLabel.TextSize = 14
@@ -217,15 +230,14 @@ StatusLabel.TextWrapped = true
 StatusLabel.Parent = MainFrame
 
 local ResetBtn = Instance.new("TextButton")
-ResetBtn.Name = BTN_NAME
 ResetBtn.Size = UDim2.new(1, 0, 0, 30)
 ResetBtn.Position = UDim2.new(0, 0, 0, 40)
-ResetBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+ResetBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 ResetBtn.BackgroundTransparency = 0.3
 ResetBtn.BorderSizePixel = 1
 ResetBtn.BorderColor3 = Color3.fromRGB(80, 80, 80)
-ResetBtn.Text = `Reset Session (Currently: {sessionTotalFarmed})`
-ResetBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
+ResetBtn.Text = `Reset Session (Saved: {sessionTotalFarmed})`
+ResetBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
 ResetBtn.Font = Enum.Font.Code
 ResetBtn.TextSize = 14
 ResetBtn.Parent = MainFrame
@@ -233,13 +245,13 @@ ResetBtn.Parent = MainFrame
 ResetBtn.MouseButton1Click:Connect(function()
     sessionTotalFarmed = 0
     pcall(function() if writefile then writefile(SaveFileName, "0") end end)
-    ResetBtn.Text = "Reset Session (Currently: 0)"
-    StatusLabel.Text = "Session tracker reset!"
-    StatusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+    ResetBtn.Text = "Reset Session (Saved: 0)"
+    StatusLabel.Text = "Internal memory wiped!"
+    StatusLabel.TextColor3 = Color3.fromRGB(120, 255, 120)
 end)
 
 -------------------------------------------------------------------------------
--- 5. STATE VARIABLES
+-- 🔄 6. ANTI-STUCK & STATE VARIABLES
 -------------------------------------------------------------------------------
 local atlasExecuted = false
 local isHopping = false
@@ -251,10 +263,27 @@ local currentTargetId = nil
 local failedAttempts = 0 
 local lastFailTime = 0 
 
+-- Fixes the BSS glitch where you spawn under the map
+local function checkAntiStuck()
+    pcall(function()
+        local char = LocalPlayer.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            if char.HumanoidRootPart.Position.Y < -50 then
+                StatusLabel.Text = "Stuck in void! Resetting..."
+                StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+                char:BreakJoints()
+                task.wait(6) -- Wait for respawn
+            end
+        end
+    end)
+end
+
 -------------------------------------------------------------------------------
--- 6. SAFER TELEPORT LOGIC
+-- 🚀 7. SAFER TELEPORT LOGIC
 -------------------------------------------------------------------------------
-TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+if getgenv().TpFailConnection then getgenv().TpFailConnection:Disconnect() end
+
+getgenv().TpFailConnection = TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
     if player == LocalPlayer then
         if currentTargetId then blacklistedServers[currentTargetId] = true end
         
@@ -263,7 +292,7 @@ TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, erro
             lastFailTime = os.time()
         end
         
-        StatusLabel.Text = "Roblox TP Fail! 15s Cooldown..."
+        StatusLabel.Text = "Roblox TP Fail! 15s Timeout..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         
         task.wait(15)
@@ -287,7 +316,7 @@ local function executeTeleport(targetId, pCountLabel)
             lastFailTime = os.time()
         end
         
-        StatusLabel.Text = "TP Error! 15s Cooldown..."
+        StatusLabel.Text = "TP Error! 15s Timeout..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         task.wait(15)
         isHopping = false
@@ -295,7 +324,7 @@ local function executeTeleport(targetId, pCountLabel)
 end
 
 -------------------------------------------------------------------------------
--- 7. THE PATIENT SERVER SCANNER
+-- 🔍 8. THE PATIENT SERVER SCANNER
 -------------------------------------------------------------------------------
 local function performHop()
     if isHopping then return end
@@ -303,7 +332,7 @@ local function performHop()
     hopStartTime = os.time() 
     
     if failedAttempts >= 3 then
-        StatusLabel.Text = "Loop! Forcing Random Hop..."
+        StatusLabel.Text = "Loop Detected! Forcing Random Hop..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         failedAttempts = 0 
         
@@ -325,7 +354,7 @@ local function performHop()
         local fallbackServers = {}
         
         while page <= maxPages do
-            StatusLabel.Text = `Scanning Pg {page}...`
+            StatusLabel.Text = `Scanning Network Pg {page}...`
             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
             
             local url = `https://games.roblox.com/v1/games/{PlaceId}/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100`
@@ -388,7 +417,7 @@ local function performHop()
 end
 
 -------------------------------------------------------------------------------
--- 8. HARD-RECONNECT ERROR CRUSHER
+-- 🔨 9. HARD-RECONNECT ERROR CRUSHER
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
@@ -412,7 +441,7 @@ task.spawn(function()
 end)
 
 -------------------------------------------------------------------------------
--- 9. VICIOUS DETECTOR
+-- 🐝 10. VICIOUS DETECTOR
 -------------------------------------------------------------------------------
 local function isViciousAlive()
     local folders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
@@ -429,7 +458,7 @@ local function isViciousAlive()
 end
 
 -------------------------------------------------------------------------------
--- 10. MAIN TIMELINE LOOP
+-- ⏳ 11. MAIN TIMELINE LOOP
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
@@ -442,6 +471,8 @@ task.spawn(function()
             end
             continue 
         end 
+        
+        checkAntiStuck() -- Ensures you aren't stuck under the map!
         
         local viciousHere = isViciousAlive()
 
@@ -468,11 +499,9 @@ task.spawn(function()
                 task.wait(5)
                 
                 local gainedStingers = stopLootListener()
-                
                 updateSessionFile(gainedStingers)
                 
-                ResetBtn.Text = `Reset Session (Currently: {sessionTotalFarmed})`
-                
+                ResetBtn.Text = `Reset Session (Saved: {sessionTotalFarmed})`
                 sendDiscordLog(gainedStingers, sessionTotalFarmed)
                 
                 performHop()
