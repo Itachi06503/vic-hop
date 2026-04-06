@@ -1,5 +1,5 @@
 -- ==============================================================================
--- 🐝 BSS VICIOUS FARMER | ERROR 279 PATCH (GHOST SERVER EVASION)
+-- 🐝 BSS VICIOUS FARMER | PRO VERSION (SECURITY & QOL UPGRADE)
 -- ==============================================================================
 local WebhookURL = "https://discord.com/api/webhooks/1487070973827219538/80wfTSKpFD4tYONg7oG4y6uqO3ayAdXrbwwIf6WjUySN7VaH5EDH110lWcfMThZBrCW9"
 
@@ -7,7 +7,7 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(5) 
 
 -- ==============================================================================
--- 🛡️ 1. ADVANCED SECURITY MODULE (TELEMETRY BLOCKER & CLONEREF)
+-- 🛡️ 1. ADVANCED SECURITY MODULE (TELEMETRY & STAT BLOCKER)
 -- ==============================================================================
 local function GetSafeService(serviceName)
     local service = game:GetService(serviceName)
@@ -15,6 +15,7 @@ local function GetSafeService(serviceName)
     return service
 end
 
+-- Intercept and block logs AND background telemetry
 pcall(function()
     if hookmetamethod and getnamecallmethod and checkcaller then
         local oldNamecall
@@ -23,6 +24,8 @@ pcall(function()
             if not checkcaller() then
                 if method == "GetLogHistory" or method == "GetMessage" then
                     return {} 
+                elseif method == "SendStats" or method == "ReportAbuse" then
+                    return -- Silently drop telemetry packets
                 end
             end
             return oldNamecall(self, ...)
@@ -49,6 +52,7 @@ local GuiService      = GetSafeService("GuiService")
 local CoreGui         = GetSafeService("CoreGui")
 local VirtualUser     = GetSafeService("VirtualUser")
 local Lighting        = GetSafeService("Lighting")
+local RunService      = GetSafeService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
@@ -57,7 +61,7 @@ local GUI_NAME = GenerateRandomString(14)
 local FRAME_NAME = GenerateRandomString(12)
 
 -------------------------------------------------------------------------------
--- ⚙️ 2. INSTANT MOBILE FPS BOOSTER
+-- ⚙️ 2. INSTANT MOBILE FPS & BATTERY BOOSTER
 -------------------------------------------------------------------------------
 task.spawn(function()
     pcall(function()
@@ -77,12 +81,20 @@ task.spawn(function()
     end)
 end)
 
+-- Battery Saver: Lower FPS when unfocused (if executor supports setfpscap)
+pcall(function()
+    if setfpscap then
+        RunService.WindowFocusReleased:Connect(function() setfpscap(15) end)
+        RunService.WindowFocused:Connect(function() setfpscap(60) end)
+    end
+end)
+
 -------------------------------------------------------------------------------
 -- 💾 3. DEVICE FILE SAVING & LOOT TRACKER
 -------------------------------------------------------------------------------
 local sessionGained = 0
 local popupListener = nil
-local SaveFileName = "ViciousSessionTotal_Secured.txt"
+local SaveFileName = "ViciousSessionTotal_Pro.txt"
 local sessionTotalFarmed = 0
 
 pcall(function()
@@ -156,7 +168,7 @@ local function sendDiscordLog(gained, sessionTotal)
                             ["inline"] = true
                         }
                     },
-                    ["footer"] = {["text"] = "Delta Auto-Hopper • Stealth Version"}
+                    ["footer"] = {["text"] = "Delta Auto-Hopper • Pro Version"}
                 }}
             }
             local jsonData = HttpService:JSONEncode(data)
@@ -185,12 +197,12 @@ getgenv().AntiAfkConnection = LocalPlayer.Idled:Connect(function()
 end)
 
 -------------------------------------------------------------------------------
--- 🖥️ 5. OBFUSCATED UI CREATION 
+-- 🖥️ 5. OBFUSCATED COLLAPSIBLE UI 
 -------------------------------------------------------------------------------
 pcall(function()
     local hiddenGui = gethui and gethui() or CoreGui
     for _, v in ipairs(hiddenGui:GetChildren()) do 
-        if v:IsA("ScreenGui") and v:FindFirstChildOfClass("Frame") and v.Frame.Size.Y.Offset == 70 then 
+        if v:IsA("ScreenGui") and v:FindFirstChildOfClass("Frame") and v.Frame.Size.Y.Offset >= 70 then 
             v:Destroy() 
         end 
     end
@@ -217,34 +229,68 @@ MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 
+local TopBar = Instance.new("Frame")
+TopBar.Size = UDim2.new(1, 0, 0, 15)
+TopBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+TopBar.BorderSizePixel = 0
+TopBar.Parent = MainFrame
+
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size = UDim2.new(0, 30, 1, 0)
+MinBtn.Position = UDim2.new(1, -30, 0, 0)
+MinBtn.BackgroundTransparency = 1
+MinBtn.Text = "[-]"
+MinBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+MinBtn.Font = Enum.Font.Code
+MinBtn.TextSize = 12
+MinBtn.Parent = TopBar
+
 local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(1, 0, 0, 40)
+StatusLabel.Size = UDim2.new(1, 0, 0, 25)
+StatusLabel.Position = UDim2.new(0, 0, 0, 15)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Initializing Stealth UI..."
+StatusLabel.Text = "Initializing Pro Stealth..."
 StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLabel.Font = Enum.Font.Code
-StatusLabel.TextSize = 14
+StatusLabel.TextSize = 13
 StatusLabel.TextWrapped = true
 StatusLabel.Parent = MainFrame
 
 local ResetBtn = Instance.new("TextButton")
-ResetBtn.Size = UDim2.new(1, 0, 0, 30)
-ResetBtn.Position = UDim2.new(0, 0, 0, 40)
+ResetBtn.Size = UDim2.new(1, -10, 0, 25)
+ResetBtn.Position = UDim2.new(0, 5, 0, 40)
 ResetBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 ResetBtn.BackgroundTransparency = 0.3
 ResetBtn.BorderSizePixel = 1
 ResetBtn.BorderColor3 = Color3.fromRGB(80, 80, 80)
-ResetBtn.Text = `Reset Session (Saved: {sessionTotalFarmed})`
+ResetBtn.Text = `Reset (Saved: {sessionTotalFarmed})`
 ResetBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
 ResetBtn.Font = Enum.Font.Code
-ResetBtn.TextSize = 14
+ResetBtn.TextSize = 13
 ResetBtn.Parent = MainFrame
+
+-- Minimize/Maximize Logic
+local minimized = false
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        MainFrame.Size = UDim2.new(0, 240, 0, 15)
+        StatusLabel.Visible = false
+        ResetBtn.Visible = false
+        MinBtn.Text = "[+]"
+    else
+        MainFrame.Size = UDim2.new(0, 240, 0, 70)
+        StatusLabel.Visible = true
+        ResetBtn.Visible = true
+        MinBtn.Text = "[-]"
+    end
+end)
 
 ResetBtn.MouseButton1Click:Connect(function()
     sessionTotalFarmed = 0
     pcall(function() if writefile then writefile(SaveFileName, "0") end end)
-    ResetBtn.Text = "Reset Session (Saved: 0)"
-    StatusLabel.Text = "Internal memory wiped!"
+    ResetBtn.Text = "Reset (Saved: 0)"
+    StatusLabel.Text = "Memory wiped!"
     StatusLabel.TextColor3 = Color3.fromRGB(120, 255, 120)
 end)
 
@@ -366,7 +412,6 @@ local function performHop()
                 rateLimitRetries = 0 
                 
                 for _, srv in ipairs(result.data) do
-                    -- Filter out servers with crazy high ping (likely dead)
                     if srv.id ~= game.JobId and not blacklistedServers[srv.id] and type(srv.ping) == "number" and srv.ping < 500 then
                         if srv.playing >= 2 and srv.playing <= 6 then
                             table.insert(validServers, srv)
@@ -378,9 +423,6 @@ local function performHop()
                 
                 if #validServers > 0 then
                     table.sort(validServers, function(a, b) return a.playing < b.playing end)
-                    
-                    -- GHOST EVASION: Pick a random server from the top 5 instead of the absolute lowest
-                    -- This prevents the script from constantly hitting the exact same dead "1-player" server
                     local selectionRange = math.min(#validServers, 5)
                     local bestTarget = validServers[math.random(1, selectionRange)]
                     
@@ -420,7 +462,7 @@ local function performHop()
 end
 
 -------------------------------------------------------------------------------
--- 🔨 9. ERROR 279 CRUSHER & RECONNECT HANDLER
+-- 🔨 9. ERROR 279 & 268 (KICK) CRUSHER
 -------------------------------------------------------------------------------
 task.spawn(function()
     while task.wait(1) do
@@ -432,25 +474,29 @@ task.spawn(function()
                     local errorPrompt = overlay:FindFirstChild("ErrorPrompt")
                     if errorPrompt and errorPrompt.Visible then
                         
-                        -- Check specifically if it's a 279 error
                         local is279 = false
+                        local is268 = false
                         pcall(function()
                             local msg = errorPrompt.MessageArea.ErrorFrame.ErrorMessage.Text
                             if string.find(msg, "279") then is279 = true end
+                            if string.find(msg, "268") or string.find(string.lower(msg), "unexpected client behavior") then is268 = true end
                         end)
 
                         GuiService:ClearError() 
                         
-                        if is279 then
+                        if is268 then
+                            StatusLabel.Text = "SOFT KICK (268)! Cooling down 30s..."
+                            StatusLabel.TextColor3 = Color3.fromRGB(255, 150, 50)
+                            task.wait(30) -- Need a longer wait for hardware flag to clear
+                        elseif is279 then
                             StatusLabel.Text = "ERROR 279 DETECTED! Waiting 10s..."
                             StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                            task.wait(10) -- Give network time to clear ghost connection
+                            task.wait(10) 
                         else
                             StatusLabel.Text = "DISCONNECTED! Forcing reconnect..."
                             StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
                         end
                         
-                        -- Teleport to a totally fresh random server
                         TeleportService:Teleport(PlaceId, LocalPlayer)
                         task.wait(15)
                     end
@@ -521,7 +567,7 @@ task.spawn(function()
                 local gainedStingers = stopLootListener()
                 updateSessionFile(gainedStingers)
                 
-                ResetBtn.Text = `Reset Session (Saved: {sessionTotalFarmed})`
+                ResetBtn.Text = `Reset (Saved: {sessionTotalFarmed})`
                 sendDiscordLog(gainedStingers, sessionTotalFarmed)
                 
                 performHop()
