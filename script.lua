@@ -1,7 +1,7 @@
 -- ==============================================================================
--- 🐝 BSS VICIOUS FARMER | PRO VERSION (SECURITY & QOL UPGRADE)
+-- 🐝 BSS VICIOUS FARMER | PRO VERSION (OPTIMIZED REVISION)
 -- ==============================================================================
-local WebhookURL = "https://discord.com/api/webhooks/1487070973827219538/80wfTSKpFD4tYONg7oG4y6uqO3ayAdXrbwwIf6WjUySN7VaH5EDH110lWcfMThZBrCW9"
+local WebhookURL = "YOUR_WEBHOOK_URL_HERE" -- [!] PASTE YOUR WEBHOOK HERE
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(5) 
@@ -15,7 +15,6 @@ local function GetSafeService(serviceName)
     return service
 end
 
--- Intercept and block logs AND background telemetry
 pcall(function()
     if hookmetamethod and getnamecallmethod and checkcaller then
         local oldNamecall
@@ -25,7 +24,7 @@ pcall(function()
                 if method == "GetLogHistory" or method == "GetMessage" then
                     return {} 
                 elseif method == "SendStats" or method == "ReportAbuse" then
-                    return -- Silently drop telemetry packets
+                    return
                 end
             end
             return oldNamecall(self, ...)
@@ -43,13 +42,11 @@ local function GenerateRandomString(length)
     return result
 end
 
--- Safe Services
 local TeleportService = GetSafeService("TeleportService")
 local HttpService     = GetSafeService("HttpService")
 local Players         = GetSafeService("Players")
 local Workspace       = GetSafeService("Workspace")
 local GuiService      = GetSafeService("GuiService")
-local CoreGui         = GetSafeService("CoreGui")
 local VirtualUser     = GetSafeService("VirtualUser")
 local Lighting        = GetSafeService("Lighting")
 local RunService      = GetSafeService("RunService")
@@ -81,7 +78,6 @@ task.spawn(function()
     end)
 end)
 
--- Battery Saver: Lower FPS when unfocused (if executor supports setfpscap)
 pcall(function()
     if setfpscap then
         RunService.WindowFocusReleased:Connect(function() setfpscap(15) end)
@@ -106,9 +102,7 @@ end)
 local function updateSessionFile(addedAmount)
     sessionTotalFarmed = sessionTotalFarmed + addedAmount
     pcall(function()
-        if writefile then
-            writefile(SaveFileName, tostring(sessionTotalFarmed))
-        end
+        if writefile then writefile(SaveFileName, tostring(sessionTotalFarmed)) end
     end)
 end
 
@@ -126,9 +120,7 @@ local function startLootListener()
                     local text = string.lower(desc.Text)
                     if string.find(text, "stinger") then
                         local amount = tonumber(string.match(text, "%d+"))
-                        if amount then
-                            sessionGained = sessionGained + amount
-                        end
+                        if amount then sessionGained = sessionGained + amount end
                     end
                 end)
             end)
@@ -137,10 +129,7 @@ local function startLootListener()
 end
 
 local function stopLootListener()
-    if popupListener then 
-        popupListener:Disconnect()
-        popupListener = nil 
-    end
+    if popupListener then popupListener:Disconnect(); popupListener = nil end
     return sessionGained
 end
 
@@ -149,37 +138,26 @@ local function sendDiscordLog(gained, sessionTotal)
     
     task.spawn(function()
         pcall(function()
-            local embedColor = gained > 0 and tonumber("0x00FF00") or tonumber("0xFFA500") 
-            
+            local embedColor = gained > 0 and 65280 or 16753920 -- Hex to Dec
             local data = {
                 ["embeds"] = {{
                     ["title"] = "🐝 Vicious Bee Defeated!",
                     ["description"] = `Successfully cleared a server!\n**Server ID:** ||{game.JobId}||`,
                     ["color"] = embedColor,
                     ["fields"] = {
-                        {
-                            ["name"] = "🗡️ Stingers Gained",
-                            ["value"] = `+{gained}`,
-                            ["inline"] = true
-                        },
-                        {
-                            ["name"] = "📈 Session Farmed",
-                            ["value"] = tostring(sessionTotal),
-                            ["inline"] = true
-                        }
+                        {["name"] = "🗡️ Stingers Gained", ["value"] = `+{gained}`, ["inline"] = true},
+                        {["name"] = "📈 Session Farmed", ["value"] = tostring(sessionTotal), ["inline"] = true}
                     },
                     ["footer"] = {["text"] = "Delta Auto-Hopper • Pro Version"}
                 }}
             }
-            local jsonData = HttpService:JSONEncode(data)
             local httpRequest = (request or http_request or HttpPost or syn.request)
-            
             if httpRequest then
                 httpRequest({
                     Url = WebhookURL,
                     Method = "POST",
                     Headers = {["Content-Type"] = "application/json"},
-                    Body = jsonData
+                    Body = HttpService:JSONEncode(data)
                 })
             end
         end)
@@ -190,7 +168,6 @@ end
 -- 💤 4. GARBAGE-COLLECTED ANTI-AFK
 -------------------------------------------------------------------------------
 if getgenv().AntiAfkConnection then getgenv().AntiAfkConnection:Disconnect() end
-
 getgenv().AntiAfkConnection = LocalPlayer.Idled:Connect(function()
     VirtualUser:CaptureController()
     VirtualUser:ClickButton2(Vector2.new())
@@ -200,7 +177,7 @@ end)
 -- 🖥️ 5. OBFUSCATED COLLAPSIBLE UI 
 -------------------------------------------------------------------------------
 pcall(function()
-    local hiddenGui = gethui and gethui() or CoreGui
+    local hiddenGui = gethui and gethui() or game:GetService("CoreGui")
     for _, v in ipairs(hiddenGui:GetChildren()) do 
         if v:IsA("ScreenGui") and v:FindFirstChildOfClass("Frame") and v.Frame.Size.Y.Offset >= 70 then 
             v:Destroy() 
@@ -211,13 +188,10 @@ end)
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = GUI_NAME
 ScreenGui.ResetOnSpawn = false
+pcall(function() ScreenGui.Parent = gethui() end)
+if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
-local successMount = pcall(function() ScreenGui.Parent = gethui() end)
-if not successMount or not ScreenGui.Parent then 
-    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") 
-end
-
-local MainFrame = Instance.new("Frame")
+local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Name = FRAME_NAME
 MainFrame.Size = UDim2.new(0, 240, 0, 70) 
 MainFrame.Position = UDim2.new(0.5, -120, 0, 20) 
@@ -227,15 +201,13 @@ MainFrame.BorderSizePixel = 2
 MainFrame.BorderColor3 = Color3.fromRGB(50, 50, 50)
 MainFrame.Active = true
 MainFrame.Draggable = true
-MainFrame.Parent = ScreenGui
 
-local TopBar = Instance.new("Frame")
+local TopBar = Instance.new("Frame", MainFrame)
 TopBar.Size = UDim2.new(1, 0, 0, 15)
 TopBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 TopBar.BorderSizePixel = 0
-TopBar.Parent = MainFrame
 
-local MinBtn = Instance.new("TextButton")
+local MinBtn = Instance.new("TextButton", TopBar)
 MinBtn.Size = UDim2.new(0, 30, 1, 0)
 MinBtn.Position = UDim2.new(1, -30, 0, 0)
 MinBtn.BackgroundTransparency = 1
@@ -243,9 +215,8 @@ MinBtn.Text = "[-]"
 MinBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
 MinBtn.Font = Enum.Font.Code
 MinBtn.TextSize = 12
-MinBtn.Parent = TopBar
 
-local StatusLabel = Instance.new("TextLabel")
+local StatusLabel = Instance.new("TextLabel", MainFrame)
 StatusLabel.Size = UDim2.new(1, 0, 0, 25)
 StatusLabel.Position = UDim2.new(0, 0, 0, 15)
 StatusLabel.BackgroundTransparency = 1
@@ -254,9 +225,8 @@ StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLabel.Font = Enum.Font.Code
 StatusLabel.TextSize = 13
 StatusLabel.TextWrapped = true
-StatusLabel.Parent = MainFrame
 
-local ResetBtn = Instance.new("TextButton")
+local ResetBtn = Instance.new("TextButton", MainFrame)
 ResetBtn.Size = UDim2.new(1, -10, 0, 25)
 ResetBtn.Position = UDim2.new(0, 5, 0, 40)
 ResetBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
@@ -267,23 +237,14 @@ ResetBtn.Text = `Reset (Saved: {sessionTotalFarmed})`
 ResetBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
 ResetBtn.Font = Enum.Font.Code
 ResetBtn.TextSize = 13
-ResetBtn.Parent = MainFrame
 
--- Minimize/Maximize Logic
 local minimized = false
 MinBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
-    if minimized then
-        MainFrame.Size = UDim2.new(0, 240, 0, 15)
-        StatusLabel.Visible = false
-        ResetBtn.Visible = false
-        MinBtn.Text = "[+]"
-    else
-        MainFrame.Size = UDim2.new(0, 240, 0, 70)
-        StatusLabel.Visible = true
-        ResetBtn.Visible = true
-        MinBtn.Text = "[-]"
-    end
+    MainFrame.Size = minimized and UDim2.new(0, 240, 0, 15) or UDim2.new(0, 240, 0, 70)
+    StatusLabel.Visible = not minimized
+    ResetBtn.Visible = not minimized
+    MinBtn.Text = minimized and "[+]" or "[-]"
 end)
 
 ResetBtn.MouseButton1Click:Connect(function()
@@ -301,22 +262,18 @@ local atlasExecuted = false
 local isHopping = false
 local hopCountdown = 10 
 local hopStartTime = 0 
-
 local blacklistedServers = {} 
-local currentTargetId = nil   
 local failedAttempts = 0 
 local lastFailTime = 0 
 
 local function checkAntiStuck()
     pcall(function()
         local char = LocalPlayer.Character
-        if char and char:FindFirstChild("HumanoidRootPart") then
-            if char.HumanoidRootPart.Position.Y < -50 then
-                StatusLabel.Text = "Stuck in void! Resetting..."
-                StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-                char:BreakJoints()
-                task.wait(6) 
-            end
+        if char and char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart.Position.Y < -50 then
+            StatusLabel.Text = "Stuck in void! Resetting..."
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+            char:BreakJoints()
+            task.wait(6) 
         end
     end)
 end
@@ -325,40 +282,27 @@ end
 -- 🚀 7. SAFER TELEPORT LOGIC
 -------------------------------------------------------------------------------
 if getgenv().TpFailConnection then getgenv().TpFailConnection:Disconnect() end
-
-getgenv().TpFailConnection = TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+getgenv().TpFailConnection = TeleportService.TeleportInitFailed:Connect(function(player)
     if player == LocalPlayer then
-        if currentTargetId then blacklistedServers[currentTargetId] = true end
-        
         if os.time() - lastFailTime > 2 then
             failedAttempts += 1
             lastFailTime = os.time()
         end
-        
         StatusLabel.Text = "Roblox TP Fail! 15s Timeout..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-        
         task.wait(15)
         isHopping = false
     end
 end)
 
 local function executeTeleport(targetId, pCountLabel)
-    currentTargetId = targetId
+    blacklistedServers[targetId] = true
     StatusLabel.Text = `Teleporting ({pCountLabel})...`
     StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
     
-    local success, err = pcall(function()
-        TeleportService:TeleportToPlaceInstance(PlaceId, targetId, LocalPlayer)
-    end)
-    
+    local success = pcall(function() TeleportService:TeleportToPlaceInstance(PlaceId, targetId, LocalPlayer) end)
     if not success then
-        blacklistedServers[targetId] = true
-        if os.time() - lastFailTime > 2 then
-            failedAttempts += 1
-            lastFailTime = os.time()
-        end
-        
+        failedAttempts += 1
         StatusLabel.Text = "TP Error! 15s Timeout..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         task.wait(15)
@@ -378,54 +322,36 @@ local function performHop()
         StatusLabel.Text = "Loop Detected! Random Hop..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         failedAttempts = 0 
-        
         pcall(function() TeleportService:Teleport(PlaceId, LocalPlayer) end)
-        task.defer(function()
-            task.wait(20)
-            isHopping = false 
-        end)
+        task.delay(20, function() isHopping = false end)
         return 
     end
     
     task.spawn(function()
         local cursor = ""
         local page = 1
-        local maxPages = 50 
-        local rateLimitRetries = 0
+        local validServers, fallbackServers = {}, {}
         
-        local validServers = {}
-        local fallbackServers = {}
-        
-        while page <= maxPages do
+        while page <= 50 do
             StatusLabel.Text = `Scanning Network Pg {page}...`
             StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
             
             local url = `https://games.roblox.com/v1/games/{PlaceId}/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100`
             if cursor ~= "" then url ..= `&cursor={cursor}` end
-            url ..= `&_={math.random(10000, 99999)}`
             
-            local success, result = pcall(function()
-                return HttpService:JSONDecode(game:HttpGet(url))
-            end)
+            local success, result = pcall(function() return HttpService:JSONDecode(game:HttpGet(url)) end)
             
             if success and result and result.data then
-                rateLimitRetries = 0 
-                
                 for _, srv in ipairs(result.data) do
                     if srv.id ~= game.JobId and not blacklistedServers[srv.id] and type(srv.ping) == "number" and srv.ping < 500 then
-                        if srv.playing >= 2 and srv.playing <= 6 then
-                            table.insert(validServers, srv)
-                        elseif srv.playing == 1 then
-                            table.insert(fallbackServers, srv)
-                        end
+                        if srv.playing >= 2 and srv.playing <= 6 then table.insert(validServers, srv)
+                        elseif srv.playing == 1 then table.insert(fallbackServers, srv) end
                     end
                 end
                 
                 if #validServers > 0 then
                     table.sort(validServers, function(a, b) return a.playing < b.playing end)
-                    local selectionRange = math.min(#validServers, 5)
-                    local bestTarget = validServers[math.random(1, selectionRange)]
-                    
+                    local bestTarget = validServers[math.random(1, math.min(#validServers, 5))]
                     executeTeleport(bestTarget.id, `{bestTarget.playing} players`)
                     return 
                 end
@@ -433,95 +359,80 @@ local function performHop()
                 if result.nextPageCursor then
                     cursor = result.nextPageCursor
                     page += 1
-                    task.wait(1.5) 
-                else
-                    break 
-                end
+                    task.wait(1) 
+                else break end
             else
-                rateLimitRetries += 1
-                if rateLimitRetries > 3 then break end
-                
                 StatusLabel.Text = "Rate limited. Waiting 15s..."
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
                 task.wait(15) 
+                break
             end
         end
         
         if #fallbackServers > 0 then
-            local target = fallbackServers[math.random(1, #fallbackServers)]
-            executeTeleport(target.id, "1 player fallback")
+            executeTeleport(fallbackServers[math.random(1, #fallbackServers)].id, "1 player fallback")
         else
             StatusLabel.Text = "No Valid Servers! Random Hop..."
-            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
             failedAttempts += 1
             pcall(function() TeleportService:Teleport(PlaceId, LocalPlayer) end)
-            task.wait(20)
-            isHopping = false 
+            task.delay(20, function() isHopping = false end)
         end
     end)
 end
 
 -------------------------------------------------------------------------------
--- 🔨 9. ERROR 279 & 268 (KICK) CRUSHER
+-- 🔨 9. ERROR 279 & 268 (KICK) CRUSHER (NATIVE UI EVENT)
 -------------------------------------------------------------------------------
-task.spawn(function()
-    while task.wait(1) do
-        pcall(function()
-            local prompt = CoreGui:FindFirstChild("RobloxPromptGui")
-            if prompt then
-                local overlay = prompt:FindFirstChild("promptOverlay")
-                if overlay then
-                    local errorPrompt = overlay:FindFirstChild("ErrorPrompt")
-                    if errorPrompt and errorPrompt.Visible then
-                        
-                        local is279 = false
-                        local is268 = false
-                        pcall(function()
-                            local msg = errorPrompt.MessageArea.ErrorFrame.ErrorMessage.Text
-                            if string.find(msg, "279") then is279 = true end
-                            if string.find(msg, "268") or string.find(string.lower(msg), "unexpected client behavior") then is268 = true end
-                        end)
-
-                        GuiService:ClearError() 
-                        
-                        if is268 then
-                            StatusLabel.Text = "SOFT KICK (268)! Cooling down 30s..."
-                            StatusLabel.TextColor3 = Color3.fromRGB(255, 150, 50)
-                            task.wait(30) -- Need a longer wait for hardware flag to clear
-                        elseif is279 then
-                            StatusLabel.Text = "ERROR 279 DETECTED! Waiting 10s..."
-                            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                            task.wait(10) 
-                        else
-                            StatusLabel.Text = "DISCONNECTED! Forcing reconnect..."
-                            StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-                        end
-                        
-                        TeleportService:Teleport(PlaceId, LocalPlayer)
-                        task.wait(15)
-                    end
-                end
-            end
-        end)
+if getgenv().KickConnection then getgenv().KickConnection:Disconnect() end
+getgenv().KickConnection = GuiService.ErrorMessageChanged:Connect(function(message)
+    if message == "" then return end
+    local lowerMsg = string.lower(message)
+    
+    if string.find(lowerMsg, "268") or string.find(lowerMsg, "unexpected client behavior") then
+        StatusLabel.Text = "SOFT KICK (268)! Cooling down 30s..."
+        StatusLabel.TextColor3 = Color3.fromRGB(255, 150, 50)
+        task.wait(30)
+    elseif string.find(lowerMsg, "279") or string.find(lowerMsg, "disconnected") then
+        StatusLabel.Text = "DISCONNECTED! Reconnecting in 10s..."
+        StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        task.wait(10)
     end
+    
+    pcall(function() TeleportService:Teleport(PlaceId, LocalPlayer) end)
 end)
 
 -------------------------------------------------------------------------------
--- 🐝 10. VICIOUS DETECTOR
+-- 🐝 10. OPTIMIZED VICIOUS DETECTOR (EVENT DRIVEN)
 -------------------------------------------------------------------------------
-local function isViciousAlive()
-    local folders = {Workspace:FindFirstChild("Particles"), Workspace:FindFirstChild("Monsters")}
-    for _, folder in ipairs(folders) do
-        if folder then
-            for _, obj in ipairs(folder:GetDescendants()) do
-                if string.find(string.lower(obj.Name), "vicious") and (obj:IsA("BasePart") or obj:IsA("Model")) then
-                    return true
-                end
-            end
-        end
+local viciousExists = false
+local activeViciousNodes = {}
+
+local function checkViciousNode(node)
+    if node and string.find(string.lower(node.Name), "vicious") then
+        activeViciousNodes[node] = true
+        viciousExists = true
     end
-    return false
 end
+
+local function removeViciousNode(node)
+    if activeViciousNodes[node] then
+        activeViciousNodes[node] = nil
+        if next(activeViciousNodes) == nil then viciousExists = false end
+    end
+end
+
+-- Hook onto Monsters and Particles safely
+local function setupFolderTracker(folderName)
+    local folder = Workspace:WaitForChild(folderName, 5)
+    if folder then
+        for _, child in ipairs(folder:GetChildren()) do checkViciousNode(child) end
+        folder.ChildAdded:Connect(checkViciousNode)
+        folder.ChildRemoved:Connect(removeViciousNode)
+    end
+end
+
+setupFolderTracker("Monsters")
+setupFolderTracker("Particles")
 
 -------------------------------------------------------------------------------
 -- ⏳ 11. MAIN TIMELINE LOOP
@@ -539,10 +450,8 @@ task.spawn(function()
         end 
         
         checkAntiStuck() 
-        
-        local viciousHere = isViciousAlive()
 
-        if viciousHere then
+        if viciousExists then
             if not atlasExecuted then
                 StatusLabel.Text = "Vicious Found! Tracking Screen..."
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
@@ -563,13 +472,13 @@ task.spawn(function()
                 StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 255)
                 
                 task.wait(5)
-                
                 local gainedStingers = stopLootListener()
                 updateSessionFile(gainedStingers)
                 
                 ResetBtn.Text = `Reset (Saved: {sessionTotalFarmed})`
                 sendDiscordLog(gainedStingers, sessionTotalFarmed)
                 
+                atlasExecuted = false -- Reset state for next server
                 performHop()
             else
                 local clockTime = Lighting.ClockTime
