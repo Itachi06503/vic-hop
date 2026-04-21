@@ -551,7 +551,7 @@ task.spawn(function()
                 atlasExecuted = true
                 
                 pcall(function()
-                    loadstring(game:HttpGet("https://raw.githubusercontent.com/Chris12089/atlasbss/main/script.lua"))()
+                    loadstring(game:HttpGet("https://raw.githubusercontent.com/Itachi06503/altas/refs/heads/main/script.lua"))()
                 end)
             else
                 StatusLabel.Text = "Killing Vicious..."
